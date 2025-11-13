@@ -1,0 +1,594 @@
+//——————————————————————————————————————————————————————————————————————————————
+// Demonstration of control and monitoring of 2 moteus controllers
+// running on a CANBed FD from longan labs.
+//  * https://mjbots.com/products/moteus-r4-11
+//  * https://www.longan-labs.cc/1030009.html
+// ——————————————————————————————————————————————————————————————————————————————
+
+//
+// 시리얼에 "1 0.1" 입력 -> 1번 모터 기준 0.1만큼 포지션 이동 (2번 모터는 -0.1만큼)
+// 시리얼에 "2 0.3" -> 2번 모터 기준 0.3만큼 포지션 이동 (1번 모터는 -0.3만큼)
+// 시리얼에 "aux" -> Read AS5600 auxiliary encoder from Moteus AUX2 port via CAN
+//
+
+#include <ACAN2517FD.h>
+#include <Moteus.h>
+
+//——————————————————————————————————————————————————————————————————————————————
+//  The following pins are selected for the CANBed FD board.
+//——————————————————————————————————————————————————————————————————————————————
+
+static const byte MCP2517_SCK = 13 ; // SCK input of MCP2517
+static const byte MCP2517_SDI =  11 ; // SDI input of MCP2517
+static const byte MCP2517_SDO =  12 ; // SDO output of MCP2517
+
+static const byte MCP2517_CS  = 10 ; // CS input of MCP2517
+
+//——————————————————————————————————————————————————————————————————————————————
+//  Motor direction multipliers (set to -1.0 to reverse a motor)
+//——————————————————————————————————————————————————————————————————————————————
+static const double MOTOR1_DIRECTION = 1.0;   // 1.0 = normal, -1.0 = reversed
+static const double MOTOR2_DIRECTION = 1.0;   // 1.0 = normal, -1.0 = reversed
+
+//——————————————————————————————————————————————————————————————————————————————
+//  ACAN2517FD Driver object
+//——————————————————————————————————————————————————————————————————————————————
+
+ACAN2517FD can (MCP2517_CS, SPI, 255) ; // Last argument is 255 -> no interrupt pin
+
+Moteus moteus1(can, []() {
+  Moteus::Options options;
+  options.id = 1; // Moteus ID (by Tview)
+  return options;
+}());
+
+Moteus moteus2(can, []() {
+  Moteus::Options options;
+  options.id = 2; // Moteus ID (by Tview)
+  return options;
+}());
+
+Moteus::PositionMode::Command position_cmd1;
+Moteus::PositionMode::Command position_cmd2;
+Moteus::PositionMode::Format position_fmt;
+
+unsigned long lastDiagnosticTime = 0;
+bool disableDiagnostics = false;  // Flag to disable diagnostics during position commands
+
+// Forward declarations
+void run2walk(int motor, double pos);
+void setPosition1(double pos1, double period_s);
+void setPosition2(double pos2, double period_s);
+void printDiagnostics();
+void oscillateMotors();
+
+void setup() {
+  pinMode (LED_BUILTIN, OUTPUT);
+
+  // Let the world know we have begun!
+  Serial.begin(115200);
+  while (!Serial) {}
+  Serial.println(F("started"));
+
+  SPI.begin();
+
+  // This operates the CAN-FD bus at 1Mbit for both the arbitration
+  // and data rate.  Most arduino shields cannot operate at 5Mbps
+  // correctly, so the moteus Arduino library permanently disables
+  // BRS.
+  ACAN2517FDSettings settings(
+      ACAN2517FDSettings::OSC_40MHz, 1000ll * 1000ll, DataBitRateFactor::x1);
+
+  // The atmega32u4 on the CANbed has only a tiny amount of memory.
+  // The ACAN2517FD driver needs custom settings so as to not exhaust
+  // all of SRAM just with its buffers.
+  settings.mArbitrationSJW = 2;
+  settings.mDriverTransmitFIFOSize = 1;
+  settings.mDriverReceiveFIFOSize = 2;
+
+
+  const uint32_t errorCode = can.begin(settings, NULL);
+
+  while (errorCode != 0) {
+    Serial.print(F("CAN error 0x"));
+    Serial.println(errorCode, HEX);
+    delay(1000);
+  }
+
+  position_fmt.position = Moteus::kInt16;
+  position_fmt.velocity = Moteus::kInt16;
+  position_fmt.maximum_torque = Moteus::kInt16;
+  position_fmt.feedforward_torque = Moteus::kInt16;
+  position_fmt.kp_scale = Moteus::kInt16;
+  position_fmt.kd_scale = Moteus::kInt16;
+  position_fmt.stop_position = Moteus::kInt16;
+  position_fmt.velocity_limit = Moteus::kInt16;
+  position_fmt.accel_limit = Moteus::kInt16;
+
+  position_cmd1.velocity_limit = 0.5;
+  position_cmd1.accel_limit = 0.1;
+
+  position_cmd2.velocity_limit = 0.5;
+  position_cmd2.accel_limit = 0.1;
+
+  // To clear any faults the controllers may have, we start by sending
+  // a stop command to each.
+  moteus1.SetStop();
+  moteus2.SetStop();
+  Serial.println(F("all stopped"));
+
+  auto print_state = [&]() {
+    const auto& v = moteus1.last_result().values;
+    Serial.print(F(" mode="));
+    Serial.print(static_cast<int>(v.mode));
+    Serial.print(F(" pos="));
+    Serial.print(v.position, 3);
+    Serial.print(F(" vel="));
+    Serial.print(v.velocity, 3);
+    Serial.print(F(" torque="));
+    Serial.print(v.torque, 3);
+    Serial.print(F(" q_current="));
+    Serial.print(v.q_current, 3);
+    Serial.print(F(" d_current="));
+    Serial.print(v.d_current, 3);
+    Serial.print(F(" abs_position="));
+    Serial.print(v.abs_position, 3);
+    Serial.print(F(" motor_temperature="));
+    Serial.print(v.motor_temperature, 3);
+    Serial.print(F(" voltage="));
+    Serial.print(v.voltage, 3);
+    Serial.println();
+
+    const auto& p = moteus2.last_result().values;
+    Serial.print(F(" mode="));
+    Serial.print(static_cast<int>(p.mode));
+    Serial.print(F(" pos="));
+    Serial.print(p.position, 3);
+    Serial.print(F(" vel="));
+    Serial.print(p.velocity, 3);
+    Serial.print(F(" torque="));
+    Serial.print(p.torque, 3);
+    Serial.print(F(" q_current="));
+    Serial.print(p.q_current, 3);
+    Serial.print(F(" d_current="));
+    Serial.print(p.d_current, 3);
+    Serial.print(F(" abs_position="));
+    Serial.print(p.abs_position, 3);
+    Serial.print(F(" motor_temperature="));
+    Serial.print(p.motor_temperature, 3);
+    Serial.print(F(" voltage="));
+    Serial.print(p.voltage, 3);
+    Serial.println();
+  };
+
+  print_state();
+}
+
+// Signed power function (like basilisk code) to handle negative values
+double signedpow(double base, double exponent) {
+  if (base >= 0) {
+    return pow(base, exponent);
+  } else {
+    return -pow(-base, exponent);
+  }
+}
+
+void loop() {
+  // Print diagnostics every 10ms (only when not executing position commands)
+  if (!disableDiagnostics) {
+    unsigned long currentTime = millis();
+    if (currentTime - lastDiagnosticTime >= 100) {
+      lastDiagnosticTime = currentTime;
+      
+      // Query both motors
+      Moteus::Query::Format query_fmt;
+      query_fmt.mode = Moteus::kInt8;
+      query_fmt.position = Moteus::kFloat;
+      query_fmt.velocity = Moteus::kFloat;
+      query_fmt.torque = Moteus::kFloat;
+      query_fmt.q_current = Moteus::kFloat;
+      query_fmt.d_current = Moteus::kFloat;
+      query_fmt.abs_position = Moteus::kFloat;
+      query_fmt.motor_temperature = Moteus::kFloat;
+      query_fmt.voltage = Moteus::kFloat;
+      
+      moteus1.SetQuery(&query_fmt);
+      moteus2.SetQuery(&query_fmt);
+      
+      printDiagnostics();
+    }
+  }
+
+  if (Serial.available()) {
+    String val = Serial.readStringUntil('\n');
+    
+    if (val.indexOf("test2") != -1) {
+      // Test Motor 2 only
+      Serial.println(F("Test: Moving Motor 2 only by 0.5..."));
+      double origin2 = moteus2.last_result().values.position;
+      
+      position_cmd2.velocity_limit = 1.0;
+      position_cmd2.accel_limit = 1.0;
+      position_cmd2.maximum_torque = 6.0;
+      position_cmd2.velocity = 1.0;
+      position_cmd2.position = origin2 + 0.5;
+      
+      Serial.print(F("Moving M2 from "));
+      Serial.print(origin2, 3);
+      Serial.print(F(" to "));
+      Serial.println(position_cmd2.position, 3);
+      
+      int loops = 0;
+      while (loops < 1000) {
+        bool got = moteus2.SetPosition(position_cmd2, &position_fmt);
+        if (got && moteus2.last_result().values.trajectory_complete) {
+          Serial.println(F("M2 complete!"));
+          break;
+        }
+        if (loops % 50 == 0) {
+          Serial.print(F("M2 pos="));
+          Serial.print(moteus2.last_result().values.position, 3);
+          Serial.print(F(" mode="));
+          Serial.println(static_cast<int>(moteus2.last_result().values.mode));
+        }
+        loops++;
+        delay(10);
+      }
+      return;
+    }
+    
+    if (val.indexOf("test") != -1) {
+      // Simple test - just move 0.1
+      Serial.println(F("Test: Moving 0.1..."));
+      double origin1 = moteus1.last_result().values.position;
+      double origin2 = moteus2.last_result().values.position;
+      
+      position_cmd1.velocity_limit = 1.0;
+      position_cmd1.accel_limit = 1.0;
+      position_cmd1.maximum_torque = 6.0;
+      position_cmd1.velocity = 1.0;
+      position_cmd2.velocity_limit = 1.0;
+      position_cmd2.accel_limit = 1.0;
+      position_cmd2.maximum_torque = 6.0;
+      position_cmd2.velocity = 1.0;
+      
+      setPosition1(origin1 + 0.1, 0.01);
+      setPosition2(origin2 + 0.1, 0.01);
+      Serial.println(F("Test complete"));
+      return;
+    }
+    
+    if (val.indexOf("osc") != -1) {
+      // Oscillate both motors - stay within mechanical limits
+      Serial.println(F("Starting oscillation (limited range)..."));
+      oscillateMotors();
+      return;
+    }
+    
+    if (val.indexOf("aux") != -1) {
+      // Just print the current values
+      const auto& v1 = moteus1.last_result().values;
+      const auto& v2 = moteus2.last_result().values;
+      
+      Serial.println(F("=== AS5600 Auxiliary Encoder (AUX2 Port) ==="));
+      Serial.print(F("Motor 1 - Absolute Position: "));
+      Serial.print(v1.abs_position, 6);
+      Serial.println(F(" revolutions"));
+      
+      Serial.print(F("Motor 2 - Absolute Position: "));
+      Serial.print(v2.abs_position, 6);
+      Serial.println(F(" revolutions"));
+      return;
+    }
+    
+    int firstIndex = val.indexOf(' ');
+    String firstValue = val.substring(0, firstIndex);
+    String secondValue = val.substring(firstIndex + 1);
+
+    if (firstValue.toInt() == 1 || firstValue.toInt() == 2) {
+      run2walk(firstValue.toInt(), secondValue.toFloat());
+      return;
+    }
+  }
+}
+
+void run2walk(int motor, double pos) {
+  position_cmd1.velocity_limit = 2.0;
+  position_cmd1.accel_limit = 2.0;
+  position_cmd1.maximum_torque = 6.0;
+  position_cmd1.velocity = 2.0;
+  position_cmd2.velocity_limit = 2.0;
+  position_cmd2.accel_limit = 2.0;
+  position_cmd2.maximum_torque = 6.0;
+  position_cmd2.velocity = 2.0;
+  if (motor == 1) {
+    Serial.println(pos);
+    double origin1 = moteus1.last_result().values.position;
+    setPosition1(origin1 + pos, 0.001);
+   // double origin2 = moteus2.last_result().values.position;
+   // setDoublePosition(origin1 - pos, origin2 + pos, 0.001);
+  } else if (motor == 2) {
+    Serial.println(pos);
+   // double origin1 = moteus1.last_result().values.position;
+    double origin2 = moteus2.last_result().values.position;
+    setPosition2(origin2 + pos, 0.001);
+   // setDoublePosition(origin1 + pos, origin2 - pos, 0.001);
+  }
+}
+
+// void setDoublePosition(double pos1, double pos2, double period_s) {
+
+//   position_cmd1.position = pos1;
+//   position_cmd2.position = pos2;
+
+//   int count = 2;
+//   int loop_count = 0;
+//   while (true) {
+//     const bool got_result1 = moteus1.SetPosition(position_cmd1, &position_fmt);
+//     const bool got_result2 = moteus2.SetPosition(position_cmd2, &position_fmt);
+    
+//     loop_count++;
+//     if (loop_count % 100 == 0) {  // Print every 100 loops
+//       Serial.print(F("Loop "));
+//       Serial.print(loop_count);
+//       Serial.print(F(" M1: got="));
+//       Serial.print(got_result1);
+//       Serial.print(F(" traj="));
+//       Serial.print(moteus1.last_result().values.trajectory_complete);
+//       Serial.print(F(" pos="));
+//       Serial.print(moteus1.last_result().values.position, 3);
+//       Serial.print(F(" | M2: got="));
+//       Serial.print(got_result2);
+//       Serial.print(F(" traj="));
+//       Serial.print(moteus2.last_result().values.trajectory_complete);
+//       Serial.print(F(" pos="));
+//       Serial.println(moteus2.last_result().values.position, 3);
+//     }
+    
+//     if (got_result1 && got_result2) {
+//       count = count - 1;
+//       if (count < 0) { count = 0; }
+//     }
+    
+//     if (count == 0 && got_result1 && got_result2 && moteus1.last_result().values.trajectory_complete && moteus2.last_result().values.trajectory_complete) {
+//       Serial.println(F("Both motors completed!"));
+//       return;
+//     }
+
+//     delay(static_cast<unsigned long>(period_s * 1000));
+//   }
+// }
+
+
+void setPosition1(double pos1, double period_s) {
+  disableDiagnostics = true;  // Disable diagnostics during position command
+  
+  // Set up query format to request trajectory_complete
+  Moteus::Query::Format query_fmt;
+  query_fmt.mode = Moteus::kInt8;
+  query_fmt.position = Moteus::kFloat;
+  query_fmt.velocity = Moteus::kFloat;
+  query_fmt.trajectory_complete = Moteus::kInt8;
+  
+  position_cmd1.position = pos1;
+  int loop_count = 0;
+  unsigned long start_time = millis();
+  const unsigned long TIMEOUT_MS = 10000;  // 10 second timeout
+  
+  Serial.print(F("Moving M1 to: "));
+  Serial.println(pos1, 3);
+  
+  while (true) {
+    const bool got_result1 = moteus1.SetPosition(position_cmd1, &position_fmt, &query_fmt);
+    loop_count++;
+    
+    // Check for timeout
+    if (millis() - start_time > TIMEOUT_MS) {
+      Serial.println(F("Motor 1 timeout!"));
+      return;
+    }
+    
+    if (loop_count % 10 == 0) {  // Print every 10 loops (more frequent)
+      Serial.print(F("M1: got="));
+      Serial.print(got_result1);
+      Serial.print(F(" traj="));
+      Serial.print(moteus1.last_result().values.trajectory_complete);
+      Serial.print(F(" pos="));
+      Serial.println(moteus1.last_result().values.position, 3);
+    }
+    
+    if (got_result1 && moteus1.last_result().values.trajectory_complete) {
+      Serial.println(F("Motor 1 completed!"));
+      disableDiagnostics = false;  // Re-enable diagnostics
+      return;
+    }
+
+    delay(10);  // Fixed 10ms delay instead of 1ms
+  }
+  
+  disableDiagnostics = false;  // Re-enable diagnostics even on timeout
+}
+
+void setPosition2(double pos2, double period_s) {
+  disableDiagnostics = true;  // Disable diagnostics during position command
+  
+  // Set up query format to request trajectory_complete
+  Moteus::Query::Format query_fmt;
+  query_fmt.mode = Moteus::kInt8;
+  query_fmt.position = Moteus::kFloat;
+  query_fmt.velocity = Moteus::kFloat;
+  query_fmt.trajectory_complete = Moteus::kInt8;
+  
+  position_cmd2.position = pos2;
+  int loop_count = 0;
+  unsigned long start_time = millis();
+  const unsigned long TIMEOUT_MS = 10000;  // 10 second timeout
+  
+  Serial.print(F("Moving M2 to: "));
+  Serial.println(pos2, 3);
+  
+  while (true) {
+    const bool got_result2 = moteus2.SetPosition(position_cmd2, &position_fmt, &query_fmt);
+    loop_count++;
+    
+    // Check for timeout
+    if (millis() - start_time > TIMEOUT_MS) {
+      Serial.println(F("Motor 2 timeout!"));
+      return;
+    }
+    
+    if (loop_count % 10 == 0) {  // Print every 10 loops (more frequent)
+      Serial.print(F("M2: got="));
+      Serial.print(got_result2);
+      Serial.print(F(" traj="));
+      Serial.print(moteus2.last_result().values.trajectory_complete);
+      Serial.print(F(" pos="));
+      Serial.println(moteus2.last_result().values.position, 3);
+    }
+    
+    if (got_result2 && moteus2.last_result().values.trajectory_complete) {
+      Serial.println(F("Motor 2 completed!"));
+      disableDiagnostics = false;  // Re-enable diagnostics
+      return;
+    }
+
+    delay(10);  // Fixed 10ms delay instead of 1ms
+  }
+  
+  disableDiagnostics = false;  // Re-enable diagnostics even on timeout
+}
+
+void printDiagnostics() {
+  const auto& v1 = moteus1.last_result().values;
+  const auto& v2 = moteus2.last_result().values;
+  
+  Serial.print(F("M1_abs="));
+  Serial.print(v1.abs_position, 6);
+  Serial.print(F(" | M2_abs="));
+  Serial.print(v2.abs_position, 6);
+  Serial.println();
+}
+
+void oscillateMotors() {
+  // VELOCITY CONTROL based on external encoder feedback (like basilisk code)
+  
+  Serial.println(F("=== Oscillation Mode (Velocity Control) ==="));
+  Serial.println(F("Using external encoder feedback - Type 'stop' to exit"));
+  
+  // Query format to get abs_position (external encoder)
+  Moteus::Query::Format query_fmt;
+  query_fmt.mode = Moteus::kInt8;
+  query_fmt.position = Moteus::kFloat;
+  query_fmt.velocity = Moteus::kFloat;
+  query_fmt.abs_position = Moteus::kFloat;  // External AS5600 encoder
+  query_fmt.fault = Moteus::kInt8;
+  
+  // Set query format for both motors
+  moteus1.SetQuery(&query_fmt);
+  moteus2.SetQuery(&query_fmt);
+  delay(50);
+  
+  // Get starting positions (both motor and external encoder)
+  double start_ext1 = moteus1.last_result().values.abs_position;
+  double start_ext2 = moteus2.last_result().values.abs_position;
+  double start_mpos1 = moteus1.last_result().values.position;
+  double start_mpos2 = moteus2.last_result().values.position;
+  
+  Serial.print(F("Start M1: mpos="));
+  Serial.print(start_mpos1, 3);
+  Serial.print(F(" ext="));
+  Serial.print(start_ext1, 4);
+  Serial.print(F(" | M2: mpos="));
+  Serial.print(start_mpos2, 3);
+  Serial.print(F(" ext="));
+  Serial.println(start_ext2, 4);
+  
+  // Check if motors are in mode 11 (stuck at limits)
+  if ((int)moteus1.last_result().values.mode == 11 || 
+      (int)moteus2.last_result().values.mode == 11) {
+    Serial.println(F("*** ERROR: Motors in Mode 11 (stuck at limits) ***"));
+    Serial.println(F("Manually reposition motors away from limits first"));
+    Serial.println(F("Recommended: M1 and M2 to positions where ext encoders are 0.15-0.35"));
+    return;
+  }
+  
+  // Very small oscillation range to stay within motor position limits (±0.05 ext = ±1.05 motor revs)
+  const double OSCILLATION_AMPLITUDE = 0.05;
+  const double TARGET_LOW_1 = start_ext1 - OSCILLATION_AMPLITUDE;
+  const double TARGET_HIGH_1 = start_ext1 + OSCILLATION_AMPLITUDE;
+  const double TARGET_LOW_2 = start_ext2 - OSCILLATION_AMPLITUDE;
+  const double TARGET_HIGH_2 = start_ext2 + OSCILLATION_AMPLITUDE;
+  
+  Serial.print(F("Oscillation range: M1["));
+  Serial.print(TARGET_LOW_1, 3);
+  Serial.print(F(" to "));
+  Serial.print(TARGET_HIGH_1, 3);
+  Serial.print(F("] M2["));
+  Serial.print(TARGET_LOW_2, 3);
+  Serial.print(F(" to "));
+  Serial.print(TARGET_HIGH_2, 3);
+  Serial.println(F("]"));
+  const double MAX_VELOCITY = 0.5;   // Maximum velocity (not used in position mode)
+  const double MAX_ACCELERATION = 0.2;  // Maximum acceleration (not used in position mode)
+  const double DAMPING_THRESHOLD = 0.05;  // Not used in position mode
+  const double FIX_THRESHOLD = 0.015;  // Consider reached when within 0.015 revolutions
+  const double GEAR_RATIO = 21.0;    // Motor revolutions per external encoder revolution (from basilisk)
+  
+  int loop_count = 0;
+  unsigned long start_time = millis();
+  
+  Serial.println(F("Using continuous sine wave velocity like BasicControl"));
+  
+  while (true) {
+    // Check for stop command
+    if (Serial.available()) {
+      String val = Serial.readStringUntil('\n');
+      if (val.indexOf("stop") != -1) {
+        Serial.println(F("Stopping..."));
+        moteus1.SetStop();
+        moteus2.SetStop();
+        return;
+      }
+    }
+    
+    // Use sine wave velocity like BasicControl - motors oscillate continuously
+    const auto time = millis() - start_time;
+    const double period_ms = 4000.0;  // 4 second period for full oscillation cycle
+    const double max_velocity = 0.5;  // Maximum velocity in rev/s
+    
+    // Calculate velocity using sine wave (opposite phases for M1 and M2)
+    double velocity1 = max_velocity * sin(2.0 * M_PI * time / period_ms);
+    double velocity2 = max_velocity * sin(2.0 * M_PI * time / period_ms + M_PI);  // 180 degrees out of phase
+    
+    // Send velocity commands
+    Moteus::PositionMode::Command pos_cmd1;
+    pos_cmd1.position = NaN;  // No position target
+    pos_cmd1.velocity = velocity1 * MOTOR1_DIRECTION;
+    
+    Moteus::PositionMode::Command pos_cmd2;
+    pos_cmd2.position = NaN;  // No position target
+    pos_cmd2.velocity = velocity2 * MOTOR2_DIRECTION;
+    
+    moteus1.SetPosition(pos_cmd1, &position_fmt);
+    moteus2.SetPosition(pos_cmd2, &position_fmt);
+    
+    loop_count++;
+    if (loop_count % 50 == 0) {
+      const auto& r1 = moteus1.last_result().values;
+      const auto& r2 = moteus2.last_result().values;
+      
+      Serial.print(F("time="));
+      Serial.print(time);
+      Serial.print(F(" | M1: mpos="));
+      Serial.print(r1.position, 2);
+      Serial.print(F(" vel="));
+      Serial.print(velocity1, 2);
+      Serial.print(F(" | M2: mpos="));
+      Serial.print(r2.position, 2);
+      Serial.print(F(" vel="));
+      Serial.println(velocity2, 2);
+    }
+    
+    delay(10);  // 100Hz control loop
+  }
+}
