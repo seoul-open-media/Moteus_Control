@@ -9,6 +9,9 @@
 #include <Moteus.h>
 #include "config.h"
 #include "motor_control.h"
+#include "display.h"
+#include "neokey.h"
+#include "xbee.h"
 
 //——————————————————————————————————————————————————————————————————————————————
 //  ACAN2517FD Driver object
@@ -39,8 +42,22 @@ void setup() {
 
   // Let the world know we have begun!
   Serial.begin(115200);
-  while (!Serial) {}
+ // while (!Serial) {}
+ delay(1000);
   Serial.println(F("started"));
+
+  // Initialize OLED display on Wire1
+  initDisplay();
+  displayStatus("Initializing...");
+  
+  // Scan I2C bus to verify display is connected
+ // scanI2C();
+  
+  // Initialize NeoKey on Wire (I2C bus 0)
+  initNeoKey();
+  
+  // Initialize XBee on Serial1
+  initXBee();
 
   SPI.begin();
 
@@ -88,7 +105,9 @@ void setup() {
   moteus1.SetStop();
   moteus2.SetStop();
   Serial.println(F("all stopped"));
-  delay(100);
+  
+  displayStatus("Motors ready");
+  delay(1000);
 }
 
 // Signed power function (like basilisk code) to handle negative values
@@ -101,20 +120,59 @@ double signedpow(double base, double exponent) {
 }
 
 void loop() {
+  // Query motors for current status (needed for display update)
+  static unsigned long lastQueryTime = 0;
+  unsigned long currentTime = millis();
+  
+  // Query motors at 20Hz (every 50ms) to keep display updated
+  if (currentTime - lastQueryTime >= 50) {
+    Moteus::Query::Format query_fmt;
+    query_fmt.mode = Moteus::kInt8;
+    query_fmt.position = Moteus::kFloat;
+    query_fmt.velocity = Moteus::kFloat;
+    query_fmt.abs_position = Moteus::kFloat;
+    query_fmt.motor_temperature = Moteus::kFloat;
+    
+    moteus1.SetQuery(&query_fmt);
+    moteus2.SetQuery(&query_fmt);
+    
+    lastQueryTime = currentTime;
+  }
+  
   // Call periodic diagnostics (runs every 100ms automatically)
   // Uncomment the line below to enable continuous diagnostics output
   // printDiagnosticsAll();
   
   // Check motor temperature every loop iteration
   checkMotorTemperature();
+  
+  // Update OLED display with current motor status
+  updateDisplay();
+  
+  // Check NeoKey for button presses
+  updateNeoKey();
+  
+  // Check XBee for wireless commands
+  updateXBee();
 
-  if (Serial.available()) {
-    String val = Serial.readStringUntil('\n');
+  // Check if there's a pending command from interrupt
+  String val = "";
+  if (pendingCommand.length() > 0) {
+    val = pendingCommand;
+    pendingCommand = "";  // Clear pending command
+    Serial.print(F("Processing pending: "));
+    Serial.println(val);
+  }
+  else if (Serial.available()) {
+    val = Serial.readStringUntil('\n');
     val.trim();  // Remove whitespace
-    
+  }
+  
+  if (val.length() > 0) {
     // Simple single-digit commands for preset positions
     if (val == "1") {
       Serial.println(F("Command 1: Moving Motor 1 to encoder position -0.25"));
+      displayDebug("M1 -> -0.25");
       // Query motors first to get current positions
       Moteus::Query::Format query_fmt;
       query_fmt.abs_position = Moteus::kFloat;
@@ -123,11 +181,11 @@ void loop() {
       delay(50);
       double current_ext2 = moteus2.last_result().values.abs_position;
       moveToEncoderPosition(-0.25, current_ext2);
-      return;
     }
     
-    if (val == "2") {
+    else if (val == "2") {
       Serial.println(F("Command 2: Moving Motor 1 to encoder position 0.25"));
+      displayDebug("M1 -> 0.25");
       // Query motors first to get current positions
       Moteus::Query::Format query_fmt;
       query_fmt.abs_position = Moteus::kFloat;
@@ -136,11 +194,11 @@ void loop() {
       delay(50);
       double current_ext2 = moteus2.last_result().values.abs_position;
       moveToEncoderPosition(0.25, current_ext2);
-      return;
     }
     
-    if (val == "3") {
+    else if (val == "3") {
       Serial.println(F("Command 3: Moving Motor 2 to encoder position -0.25"));
+      displayDebug("M2 -> -0.25");
       // Query motors first to get current positions
       Moteus::Query::Format query_fmt;
       query_fmt.abs_position = Moteus::kFloat;
@@ -149,11 +207,11 @@ void loop() {
       delay(50);
       double current_ext1 = moteus1.last_result().values.abs_position;
       moveToEncoderPosition(current_ext1, -0.25);
-      return;
     }
     
-    if (val == "4") {
+    else if (val == "4") {
       Serial.println(F("Command 4: Moving Motor 2 to encoder position 0.25"));
+      displayDebug("M2 -> 0.25");
       // Query motors first to get current positions
       Moteus::Query::Format query_fmt;
       query_fmt.abs_position = Moteus::kFloat;
@@ -162,13 +220,18 @@ void loop() {
       delay(50);
       double current_ext1 = moteus1.last_result().values.abs_position;
       moveToEncoderPosition(current_ext1, 0.25);
-      return;
     }
-    if (val.indexOf("osc") != -1) {
+    else if (val.indexOf("osc") != -1) {
       // Oscillate both motors
       Serial.println(F("Starting oscillation (limited range)..."));
+      displayDebug("Oscillating...");
       oscillateMotors();
-      return;
+    }
+    
+    else if (val == "scan" || val == "i2c") {
+      // Scan I2C bus for debugging
+      displayDebug("Scanning I2C...");
+      scanI2C();
     }
   }
 }
