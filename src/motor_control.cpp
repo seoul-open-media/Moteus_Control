@@ -431,8 +431,9 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
         last_ext1[reading_index] = current_ext1;
         
         // Check if encoder is stuck (4 consecutive identical readings within epsilon)
+        // Use 0.0001 rev (0.036 degrees) to allow for normal encoder noise but catch true stalls
         if (reading_index >= 3 && !motor1_done) {
-          const double EPSILON = 1e-6;
+          const double EPSILON = 0.0001;
           bool stuck1 = (abs(last_ext1[0] - last_ext1[1]) < EPSILON && 
                         abs(last_ext1[1] - last_ext1[2]) < EPSILON && 
                         abs(last_ext1[2] - last_ext1[3]) < EPSILON);
@@ -508,8 +509,9 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
         last_ext2[reading_index] = current_ext2;
         
         // Check if encoder is stuck (4 consecutive identical readings within epsilon)
+        // Use 0.0001 rev (0.036 degrees) to allow for normal encoder noise but catch true stalls
         if (reading_index >= 3 && !motor2_done) {
-          const double EPSILON = 1e-6;
+          const double EPSILON = 0.0001;
           bool stuck2 = (abs(last_ext2[0] - last_ext2[1]) < EPSILON && 
                         abs(last_ext2[1] - last_ext2[2]) < EPSILON && 
                         abs(last_ext2[2] - last_ext2[3]) < EPSILON);
