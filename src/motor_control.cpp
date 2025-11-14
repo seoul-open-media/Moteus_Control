@@ -430,11 +430,12 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
         // Store reading for stall detection
         last_ext1[reading_index] = current_ext1;
         
-        // Check if encoder is stuck (4 consecutive identical readings)
+        // Check if encoder is stuck (4 consecutive identical readings within epsilon)
         if (reading_index >= 3 && !motor1_done) {
-          bool stuck1 = (last_ext1[0] == last_ext1[1] && 
-                        last_ext1[1] == last_ext1[2] && 
-                        last_ext1[2] == last_ext1[3]);
+          const double EPSILON = 1e-6;
+          bool stuck1 = (abs(last_ext1[0] - last_ext1[1]) < EPSILON && 
+                        abs(last_ext1[1] - last_ext1[2]) < EPSILON && 
+                        abs(last_ext1[2] - last_ext1[3]) < EPSILON);
           if (stuck1 && abs(target_ext1 - current_ext1) > TOLERANCE) {
             Serial.println(F(""));
             Serial.println(F("!!! ENCODER STALL DETECTED - MOTOR 1 !!!"));
@@ -506,11 +507,12 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
         // Store reading for stall detection
         last_ext2[reading_index] = current_ext2;
         
-        // Check if encoder is stuck (4 consecutive identical readings)
+        // Check if encoder is stuck (4 consecutive identical readings within epsilon)
         if (reading_index >= 3 && !motor2_done) {
-          bool stuck2 = (last_ext2[0] == last_ext2[1] && 
-                        last_ext2[1] == last_ext2[2] && 
-                        last_ext2[2] == last_ext2[3]);
+          const double EPSILON = 1e-6;
+          bool stuck2 = (abs(last_ext2[0] - last_ext2[1]) < EPSILON && 
+                        abs(last_ext2[1] - last_ext2[2]) < EPSILON && 
+                        abs(last_ext2[2] - last_ext2[3]) < EPSILON);
           if (stuck2 && abs(target_ext2 - current_ext2) > TOLERANCE) {
             Serial.println(F(""));
             Serial.println(F("!!! ENCODER STALL DETECTED - MOTOR 2 !!!"));
