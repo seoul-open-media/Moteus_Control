@@ -450,9 +450,21 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
           if (stuck1 && error_distance > BRAKE_ZONE && abs(position_cmd1.velocity) > 1.0) {
             Serial.println(F(""));
             Serial.println(F("!!! ENCODER STALL DETECTED - MOTOR 1 !!!"));
-            Serial.print(F("Encoder stuck at: "));
+            Serial.print(F("Target: "));
+            Serial.print(target_ext1, 6);
+            Serial.print(F(" | Current: "));
             Serial.print(current_ext1, 6);
-            Serial.println(F(" (10 consecutive identical readings)"));
+            Serial.print(F(" | Error: "));
+            Serial.println(error_distance, 6);
+            Serial.print(F("Commanded velocity: "));
+            Serial.println(position_cmd1.velocity, 3);
+            Serial.println(F("Last 10 encoder readings:"));
+            for (int i = 0; i < STALL_BUFFER_SIZE; i++) {
+              Serial.print(F("  ["));
+              Serial.print(i);
+              Serial.print(F("]: "));
+              Serial.println(last_ext1[i], 6);
+            }
             Serial.println(F("STOPPING ALL MOTORS FOR SAFETY..."));
             
             displayError("M1 ENCODER STUCK!");
@@ -533,9 +545,21 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
           if (stuck2 && error_distance > BRAKE_ZONE && abs(position_cmd2.velocity) > 1.0) {
             Serial.println(F(""));
             Serial.println(F("!!! ENCODER STALL DETECTED - MOTOR 2 !!!"));
-            Serial.print(F("Encoder stuck at: "));
+            Serial.print(F("Target: "));
+            Serial.print(target_ext2, 6);
+            Serial.print(F(" | Current: "));
             Serial.print(current_ext2, 6);
-            Serial.println(F(" (10 consecutive identical readings)"));
+            Serial.print(F(" | Error: "));
+            Serial.println(error_distance, 6);
+            Serial.print(F("Commanded velocity: "));
+            Serial.println(position_cmd2.velocity, 3);
+            Serial.println(F("Last 10 encoder readings:"));
+            for (int i = 0; i < STALL_BUFFER_SIZE; i++) {
+              Serial.print(F("  ["));
+              Serial.print(i);
+              Serial.print(F("]: "));
+              Serial.println(last_ext2[i], 6);
+            }
             Serial.println(F("STOPPING ALL MOTORS FOR SAFETY..."));
             
             displayError("M2 ENCODER STUCK!");
