@@ -313,9 +313,14 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
   snprintf(buf, sizeof(buf), "Tgt: %.2f,%.2f", target_ext1, target_ext2);
   displayDebug(buf);
   
-  // Encoder stall detection - track last 4 readings
-  double last_ext1[4] = {-999, -999, -999, -999};
-  double last_ext2[4] = {-999, -999, -999, -999};
+  // Encoder stall detection - track last 10 readings (100ms @ 10ms loop)
+  const int STALL_BUFFER_SIZE = 10;
+  double last_ext1[STALL_BUFFER_SIZE];
+  double last_ext2[STALL_BUFFER_SIZE];
+  for (int i = 0; i < STALL_BUFFER_SIZE; i++) {
+    last_ext1[i] = -999;
+    last_ext2[i] = -999;
+  }
   int reading_index = 0;
   
   // Query format to get abs_position (external encoder)
@@ -427,8 +432,41 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       if (got1) {
         double current_ext1 = moteus1.last_result().values.abs_position;
         
-        // Store reading for stall detection (disabled - causing false positives)
-        // last_ext1[reading_index] = current_ext1;
+        // Store reading for stall detection
+        last_ext1[reading_index] = current_ext1;
+        
+        // Check if encoder is stuck (10 consecutive identical readings = 100ms frozen)
+        // Only check if commanding significant velocity and far from target
+        if (reading_index >= STALL_BUFFER_SIZE - 1 && !motor1_done) {
+          bool stuck1 = true;
+          for (int i = 1; i < STALL_BUFFER_SIZE; i++) {
+            if (last_ext1[i] != last_ext1[0]) {
+              stuck1 = false;
+              break;
+            }
+          }
+          double error_distance = abs(target_ext1 - current_ext1);
+          // Only trigger if: encoder stuck AND far from target AND commanding velocity
+          if (stuck1 && error_distance > BRAKE_ZONE && abs(position_cmd1.velocity) > 1.0) {
+            Serial.println(F(""));
+            Serial.println(F("!!! ENCODER STALL DETECTED - MOTOR 1 !!!"));
+            Serial.print(F("Encoder stuck at: "));
+            Serial.print(current_ext1, 6);
+            Serial.println(F(" (10 consecutive identical readings)"));
+            Serial.println(F("STOPPING ALL MOTORS FOR SAFETY..."));
+            
+            displayError("M1 ENCODER STUCK!");
+            
+            moteus1.SetStop();
+            moteus2.SetStop();
+            commandRunning = false;
+            interruptCommand = false;
+            
+            // Reset STOP key LED
+            setKeyColor(KEY_STOP, COLOR_DIM_RED);
+            return;
+          }
+        }
         
         double error1 = target_ext1 - current_ext1;
         
@@ -477,8 +515,41 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       if (got2) {
         double current_ext2 = moteus2.last_result().values.abs_position;
         
-        // Store reading for stall detection (disabled - causing false positives)
-        // last_ext2[reading_index] = current_ext2;
+        // Store reading for stall detection
+        last_ext2[reading_index] = current_ext2;
+        
+        // Check if encoder is stuck (10 consecutive identical readings = 100ms frozen)
+        // Only check if commanding significant velocity and far from target
+        if (reading_index >= STALL_BUFFER_SIZE - 1 && !motor2_done) {
+          bool stuck2 = true;
+          for (int i = 1; i < STALL_BUFFER_SIZE; i++) {
+            if (last_ext2[i] != last_ext2[0]) {
+              stuck2 = false;
+              break;
+            }
+          }
+          double error_distance = abs(target_ext2 - current_ext2);
+          // Only trigger if: encoder stuck AND far from target AND commanding velocity
+          if (stuck2 && error_distance > BRAKE_ZONE && abs(position_cmd2.velocity) > 1.0) {
+            Serial.println(F(""));
+            Serial.println(F("!!! ENCODER STALL DETECTED - MOTOR 2 !!!"));
+            Serial.print(F("Encoder stuck at: "));
+            Serial.print(current_ext2, 6);
+            Serial.println(F(" (10 consecutive identical readings)"));
+            Serial.println(F("STOPPING ALL MOTORS FOR SAFETY..."));
+            
+            displayError("M2 ENCODER STUCK!");
+            
+            moteus1.SetStop();
+            moteus2.SetStop();
+            commandRunning = false;
+            interruptCommand = false;
+            
+            // Reset STOP key LED
+            setKeyColor(KEY_STOP, COLOR_DIM_RED);
+            return;
+          }
+        }
         
         double error2 = target_ext2 - current_ext2;
         
@@ -527,8 +598,8 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       moteus1.SetPosition(position_cmd1, &position_fmt, &query_fmt);
       moteus2.SetPosition(position_cmd2, &position_fmt, &query_fmt);
       
-      // Update reading index for stall detection (disabled)
-      // reading_index = (reading_index + 1) % 4;
+      // Update reading index for stall detection (circular buffer)
+      reading_index = (reading_index + 1) % STALL_BUFFER_SIZE;
       
       loop_count++;
       
