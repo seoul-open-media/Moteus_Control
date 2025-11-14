@@ -129,6 +129,7 @@ void updateDisplay() {
   
   // Critical temperature warning with inverted display
   static bool wasInverted = false;
+  static unsigned long lastTempPrint = 0;
   bool shouldInvert = (motor1.motor_temperature > 60.0 || motor2.motor_temperature > 60.0);
   
   if (shouldInvert) {
@@ -136,18 +137,26 @@ void updateDisplay() {
     display.print(F("HOT!!!"));
     display.invertDisplay(true);
     
-    // Print to serial when first entering critical temp
-    if (!wasInverted) {
+    // Print to serial when entering critical temp or every 5 seconds
+    unsigned long now = millis();
+    if (!wasInverted || (now - lastTempPrint > 5000)) {
       Serial.println(F("!!! DISPLAY INVERTED: Temperature > 60°C !!!"));
-      Serial.print(F("M1 temp: "));
+      Serial.print(F("Time: "));
+      Serial.print(now);
+      Serial.print(F(" ms | M1 temp: "));
       Serial.print(motor1.motor_temperature, 1);
       Serial.print(F("°C | M2 temp: "));
       Serial.print(motor2.motor_temperature, 1);
       Serial.println(F("°C"));
+      lastTempPrint = now;
     }
     wasInverted = true;
   } else {
     display.invertDisplay(false);
+    if (wasInverted) {
+      // Print when leaving inverted state
+      Serial.println(F("Display normal: Temperature < 60°C"));
+    }
     wasInverted = false;
   }
   
@@ -166,6 +175,11 @@ void displayStatus(const char* message) {
 }
 
 void displayError(const char* error) {
+  // Print to serial FIRST before any display operations
+  Serial.println(F("!!! displayError() CALLED !!!"));
+  Serial.print(F("Error message: "));
+  Serial.println(error);
+  
   display.clearDisplay();
   display.setTextSize(2);
   display.setTextColor(SSD1306_WHITE);
@@ -176,6 +190,8 @@ void displayError(const char* error) {
   display.println(error);
   display.display();
   display.invertDisplay(true);
+  
+  Serial.println(F("Display inverted via displayError()"));
 }
 
 void displayDebug(const char* message) {
