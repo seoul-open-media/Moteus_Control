@@ -1,5 +1,12 @@
 #include "motor_control.h"
 #include "config.h"
+#include "display.h"
+#include "neokey.h"
+
+// Global flag to interrupt current motor command
+volatile bool interruptCommand = false;
+volatile bool commandRunning = false;
+String pendingCommand = "";
 
 void printDiagnostics() {
   const auto& v1 = moteus1.last_result().values;
@@ -39,6 +46,8 @@ void checkMotorTemperature() {
     Serial.println(F("°C (Limit: 60°C)"));
     Serial.println(F("STOPPING ALL MOTORS AND HALTING..."));
     
+    displayError("MOTOR 1 OVERHEAT!");
+    
     moteus1.SetStop();
     moteus2.SetStop();
     
@@ -56,6 +65,8 @@ void checkMotorTemperature() {
     Serial.print(v2.motor_temperature, 1);
     Serial.println(F("°C (Limit: 60°C)"));
     Serial.println(F("STOPPING ALL MOTORS AND HALTING..."));
+    
+    displayError("MOTOR 2 OVERHEAT!");
     
     moteus1.SetStop();
     moteus2.SetStop();
@@ -163,8 +174,12 @@ void printDiagnosticsAll() {
 }
 
 void oscillateMotors() {
+  commandRunning = true;
+  interruptCommand = false;
+  
   Serial.println(F("=== Oscillation Mode (Velocity Control) ==="));
   Serial.println(F("Using external encoder feedback - Type 'stop' to exit"));
+  displayDebug("Oscillate start");
   
   // Query format to get abs_position (external encoder)
   Moteus::Query::Format query_fmt;
@@ -199,6 +214,7 @@ void oscillateMotors() {
       (int)moteus2.last_result().values.mode == 11) {
     Serial.println(F("*** ERROR: Motors in Mode 11 (stuck at limits) ***"));
     Serial.println(F("Manually reposition motors away from limits first"));
+    commandRunning = false;
     return;
   }
   
@@ -208,15 +224,41 @@ void oscillateMotors() {
   Serial.println(F("Using continuous sine wave velocity"));
   
   while (true) {
-    // Check for stop command
-    if (Serial.available()) {
-      String val = Serial.readStringUntil('\n');
-      if (val.indexOf("stop") != -1) {
-        Serial.println(F("Stopping..."));
-        moteus1.SetStop();
-        moteus2.SetStop();
-        return;
+    // Check NeoKey for button presses (especially STOP button)
+    static unsigned long lastNeoKeyCheck = 0;
+    unsigned long current_time = millis();
+    if (current_time - lastNeoKeyCheck >= 50) {  // Check every 50ms
+      uint8_t buttons = neokey.read();
+      // Check if STOP button (key 3) is pressed
+      if (buttons & (1 << KEY_STOP)) {
+        Serial.println(F("STOP button pressed during oscillation!"));
+        displayDebug("K: STOP!");
+        setKeyColor(KEY_STOP, COLOR_RED);
+        interruptCommand = true;
+        lastNeoKeyCheck = current_time;
       }
+      lastNeoKeyCheck = current_time;
+    }
+    
+    // Check for interrupt command from serial input
+    if (Serial.available()) {
+      pendingCommand = Serial.readStringUntil('\n');
+      pendingCommand.trim();
+      interruptCommand = true;
+    }
+    
+    // Check for interrupt command
+    if (interruptCommand) {
+      Serial.println(F("Oscillation interrupted!"));
+      displayDebug("Interrupted!");
+      commandRunning = false;
+      interruptCommand = false;
+      moteus1.SetStop();
+      moteus2.SetStop();
+      
+      // Reset STOP key LED if it was the stop button
+      setKeyColor(KEY_STOP, COLOR_DIM_RED);
+      return;
     }
     
     // Use sine wave velocity - motors oscillate continuously
@@ -262,7 +304,19 @@ void oscillateMotors() {
 }
 
 void moveToEncoderPosition(double target_ext1, double target_ext2) {
+  commandRunning = true;
+  interruptCommand = false;
+  
   Serial.println(F("=== Move to Encoder Position ==="));
+  
+  char buf[32];
+  snprintf(buf, sizeof(buf), "Tgt: %.2f,%.2f", target_ext1, target_ext2);
+  displayDebug(buf);
+  
+  // Encoder stall detection - track last 4 readings
+  double last_ext1[4] = {-999, -999, -999, -999};
+  double last_ext2[4] = {-999, -999, -999, -999};
+  int reading_index = 0;
   
   // Query format to get abs_position (external encoder)
   Moteus::Query::Format query_fmt;
@@ -325,6 +379,42 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
   while (true) {
     unsigned long current_time = millis();
     
+    // Check NeoKey for button presses (especially STOP button)
+    static unsigned long lastNeoKeyCheck = 0;
+    if (current_time - lastNeoKeyCheck >= 50) {  // Check every 50ms
+      uint8_t buttons = neokey.read();
+      // Check if STOP button (key 3) is pressed
+      if (buttons & (1 << KEY_STOP)) {
+        Serial.println(F("STOP button pressed during movement!"));
+        displayDebug("K: STOP!");
+        setKeyColor(KEY_STOP, COLOR_RED);
+        interruptCommand = true;
+        lastNeoKeyCheck = current_time;
+      }
+      lastNeoKeyCheck = current_time;
+    }
+    
+    // Check for interrupt command from serial input
+    if (Serial.available()) {
+      pendingCommand = Serial.readStringUntil('\n');
+      pendingCommand.trim();
+      interruptCommand = true;
+    }
+    
+    // Check for interrupt command
+    if (interruptCommand) {
+      Serial.println(F("Movement interrupted!"));
+      displayDebug("Interrupted!");
+      commandRunning = false;
+      interruptCommand = false;
+      moteus1.SetStop();
+      moteus2.SetStop();
+      
+      // Reset STOP key LED if it was the stop button
+      setKeyColor(KEY_STOP, COLOR_DIM_RED);
+      return;
+    }
+    
     // Only execute control loop at specified rate
     if (current_time - last_loop_time >= LOOP_PERIOD_MS) {
       last_loop_time = current_time;
@@ -336,6 +426,36 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       // Motor 1 control logic
       if (got1) {
         double current_ext1 = moteus1.last_result().values.abs_position;
+        
+        // Store reading for stall detection
+        last_ext1[reading_index] = current_ext1;
+        
+        // Check if encoder is stuck (4 consecutive identical readings)
+        if (reading_index >= 3 && !motor1_done) {
+          bool stuck1 = (last_ext1[0] == last_ext1[1] && 
+                        last_ext1[1] == last_ext1[2] && 
+                        last_ext1[2] == last_ext1[3]);
+          if (stuck1 && abs(target_ext1 - current_ext1) > TOLERANCE) {
+            Serial.println(F(""));
+            Serial.println(F("!!! ENCODER STALL DETECTED - MOTOR 1 !!!"));
+            Serial.print(F("Encoder stuck at: "));
+            Serial.print(current_ext1, 6);
+            Serial.println(F(" (4 consecutive identical readings)"));
+            Serial.println(F("STOPPING ALL MOTORS FOR SAFETY..."));
+            
+            displayError("M1 ENCODER STUCK!");
+            
+            moteus1.SetStop();
+            moteus2.SetStop();
+            commandRunning = false;
+            interruptCommand = false;
+            
+            // Reset STOP key LED
+            setKeyColor(KEY_STOP, COLOR_DIM_RED);
+            return;
+          }
+        }
+        
         double error1 = target_ext1 - current_ext1;
         
         // Handle wrap-around
@@ -382,6 +502,36 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       // Motor 2 control logic
       if (got2) {
         double current_ext2 = moteus2.last_result().values.abs_position;
+        
+        // Store reading for stall detection
+        last_ext2[reading_index] = current_ext2;
+        
+        // Check if encoder is stuck (4 consecutive identical readings)
+        if (reading_index >= 3 && !motor2_done) {
+          bool stuck2 = (last_ext2[0] == last_ext2[1] && 
+                        last_ext2[1] == last_ext2[2] && 
+                        last_ext2[2] == last_ext2[3]);
+          if (stuck2 && abs(target_ext2 - current_ext2) > TOLERANCE) {
+            Serial.println(F(""));
+            Serial.println(F("!!! ENCODER STALL DETECTED - MOTOR 2 !!!"));
+            Serial.print(F("Encoder stuck at: "));
+            Serial.print(current_ext2, 6);
+            Serial.println(F(" (4 consecutive identical readings)"));
+            Serial.println(F("STOPPING ALL MOTORS FOR SAFETY..."));
+            
+            displayError("M2 ENCODER STUCK!");
+            
+            moteus1.SetStop();
+            moteus2.SetStop();
+            commandRunning = false;
+            interruptCommand = false;
+            
+            // Reset STOP key LED
+            setKeyColor(KEY_STOP, COLOR_DIM_RED);
+            return;
+          }
+        }
+        
         double error2 = target_ext2 - current_ext2;
         
         // Handle wrap-around
@@ -429,6 +579,9 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       moteus1.SetPosition(position_cmd1, &position_fmt, &query_fmt);
       moteus2.SetPosition(position_cmd2, &position_fmt, &query_fmt);
       
+      // Update reading index for stall detection (circular buffer)
+      reading_index = (reading_index + 1) % 4;
+      
       loop_count++;
       
       // Print status every 20 loops
@@ -463,12 +616,14 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       // Exit when both motors done
       if (motor1_done && motor2_done) {
         Serial.println(F("Both motors reached target!"));
+        displayDebug("Target reached!");
         for (int i = 0; i < 5; i++) {
           moteus1.SetStop();
           moteus2.SetStop();
           unsigned long stop_start = millis();
           while (millis() - stop_start < 10) {}
         }
+        commandRunning = false;
         break;
       }
     }
@@ -476,6 +631,8 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
     // Check timeout
     if (current_time - start_time > TIMEOUT_MS) {
       Serial.println(F("Timeout!"));
+      displayDebug("Timeout!");
+      commandRunning = false;
       moteus1.SetStop();
       moteus2.SetStop();
       break;
