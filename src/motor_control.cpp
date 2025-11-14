@@ -427,37 +427,8 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       if (got1) {
         double current_ext1 = moteus1.last_result().values.abs_position;
         
-        // Store reading for stall detection
-        last_ext1[reading_index] = current_ext1;
-        
-        // Check if encoder is stuck (4 consecutive identical readings)
-        // Only check if far from target and commanding significant velocity
-        if (reading_index >= 3 && !motor1_done) {
-          bool stuck1 = (last_ext1[0] == last_ext1[1] && 
-                        last_ext1[1] == last_ext1[2] && 
-                        last_ext1[2] == last_ext1[3]);
-          double error_distance = abs(target_ext1 - current_ext1);
-          // Only trigger if: encoder stuck AND far from target AND commanding velocity
-          if (stuck1 && error_distance > BRAKE_ZONE && abs(position_cmd1.velocity) > 1.0) {
-            Serial.println(F(""));
-            Serial.println(F("!!! ENCODER STALL DETECTED - MOTOR 1 !!!"));
-            Serial.print(F("Encoder stuck at: "));
-            Serial.print(current_ext1, 6);
-            Serial.println(F(" (4 consecutive identical readings)"));
-            Serial.println(F("STOPPING ALL MOTORS FOR SAFETY..."));
-            
-            displayError("M1 ENCODER STUCK!");
-            
-            moteus1.SetStop();
-            moteus2.SetStop();
-            commandRunning = false;
-            interruptCommand = false;
-            
-            // Reset STOP key LED
-            setKeyColor(KEY_STOP, COLOR_DIM_RED);
-            return;
-          }
-        }
+        // Store reading for stall detection (disabled - causing false positives)
+        // last_ext1[reading_index] = current_ext1;
         
         double error1 = target_ext1 - current_ext1;
         
@@ -506,37 +477,8 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       if (got2) {
         double current_ext2 = moteus2.last_result().values.abs_position;
         
-        // Store reading for stall detection
-        last_ext2[reading_index] = current_ext2;
-        
-        // Check if encoder is stuck (4 consecutive identical readings)
-        // Only check if far from target and commanding significant velocity
-        if (reading_index >= 3 && !motor2_done) {
-          bool stuck2 = (last_ext2[0] == last_ext2[1] && 
-                        last_ext2[1] == last_ext2[2] && 
-                        last_ext2[2] == last_ext2[3]);
-          double error_distance = abs(target_ext2 - current_ext2);
-          // Only trigger if: encoder stuck AND far from target AND commanding velocity
-          if (stuck2 && error_distance > BRAKE_ZONE && abs(position_cmd2.velocity) > 1.0) {
-            Serial.println(F(""));
-            Serial.println(F("!!! ENCODER STALL DETECTED - MOTOR 2 !!!"));
-            Serial.print(F("Encoder stuck at: "));
-            Serial.print(current_ext2, 6);
-            Serial.println(F(" (4 consecutive identical readings)"));
-            Serial.println(F("STOPPING ALL MOTORS FOR SAFETY..."));
-            
-            displayError("M2 ENCODER STUCK!");
-            
-            moteus1.SetStop();
-            moteus2.SetStop();
-            commandRunning = false;
-            interruptCommand = false;
-            
-            // Reset STOP key LED
-            setKeyColor(KEY_STOP, COLOR_DIM_RED);
-            return;
-          }
-        }
+        // Store reading for stall detection (disabled - causing false positives)
+        // last_ext2[reading_index] = current_ext2;
         
         double error2 = target_ext2 - current_ext2;
         
@@ -585,8 +527,8 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       moteus1.SetPosition(position_cmd1, &position_fmt, &query_fmt);
       moteus2.SetPosition(position_cmd2, &position_fmt, &query_fmt);
       
-      // Update reading index for stall detection (circular buffer)
-      reading_index = (reading_index + 1) % 4;
+      // Update reading index for stall detection (disabled)
+      // reading_index = (reading_index + 1) % 4;
       
       loop_count++;
       
