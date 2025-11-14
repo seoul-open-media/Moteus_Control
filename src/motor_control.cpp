@@ -448,6 +448,9 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
           double error_distance = abs(target_ext1 - current_ext1);
           // Only trigger if: encoder stuck AND far from target AND commanding velocity
           if (stuck1 && error_distance > BRAKE_ZONE && abs(position_cmd1.velocity) > 1.0) {
+            // Get additional motor diagnostics
+            const auto& motor_state = moteus1.last_result().values;
+            
             Serial.println(F(""));
             Serial.println(F("!!! ENCODER STALL DETECTED - MOTOR 1 !!!"));
             Serial.print(F("Target: "));
@@ -458,6 +461,14 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
             Serial.println(error_distance, 6);
             Serial.print(F("Commanded velocity: "));
             Serial.println(position_cmd1.velocity, 3);
+            Serial.print(F("Motor actual velocity: "));
+            Serial.print(motor_state.velocity, 3);
+            Serial.println(F(" rev/s"));
+            Serial.print(F("Motor position: "));
+            Serial.print(motor_state.position, 4);
+            Serial.println(F(" rev"));
+            Serial.print(F("Motor mode: "));
+            Serial.println(static_cast<int>(motor_state.mode));
             Serial.println(F("Last 10 encoder readings:"));
             for (int i = 0; i < STALL_BUFFER_SIZE; i++) {
               Serial.print(F("  ["));
@@ -543,6 +554,9 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
           double error_distance = abs(target_ext2 - current_ext2);
           // Only trigger if: encoder stuck AND far from target AND commanding velocity
           if (stuck2 && error_distance > BRAKE_ZONE && abs(position_cmd2.velocity) > 1.0) {
+            // Get additional motor diagnostics
+            const auto& motor_state = moteus2.last_result().values;
+            
             Serial.println(F(""));
             Serial.println(F("!!! ENCODER STALL DETECTED - MOTOR 2 !!!"));
             Serial.print(F("Target: "));
@@ -553,6 +567,14 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
             Serial.println(error_distance, 6);
             Serial.print(F("Commanded velocity: "));
             Serial.println(position_cmd2.velocity, 3);
+            Serial.print(F("Motor actual velocity: "));
+            Serial.print(motor_state.velocity, 3);
+            Serial.println(F(" rev/s"));
+            Serial.print(F("Motor position: "));
+            Serial.print(motor_state.position, 4);
+            Serial.println(F(" rev"));
+            Serial.print(F("Motor mode: "));
+            Serial.println(static_cast<int>(motor_state.mode));
             Serial.println(F("Last 10 encoder readings:"));
             for (int i = 0; i < STALL_BUFFER_SIZE; i++) {
               Serial.print(F("  ["));
