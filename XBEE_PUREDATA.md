@@ -3,12 +3,12 @@
 ## Hardware Setup
 
 ### XBee Connection to Teensy
-- XBee TX → Teensy Serial1 RX
-- XBee RX → Teensy Serial1 TX  
+- XBee TX → Teensy Serial4 RX
+- XBee RX → Teensy Serial4 TX  
 - XBee VCC → 3.3V
 - XBee GND → GND
 
-**Note**: XBee operates at 3.3V logic levels. Teensy 2.0 is 5V, so you may need a level shifter.
+**Note**: XBee operates at 3.3V logic levels. Check your Teensy model for voltage compatibility.
 
 ### XBee Configuration
 Both XBee modules (on PC and Teensy) should be configured with:
@@ -148,9 +148,8 @@ To parse incoming status messages:
 ## Teensy Serial Ports
 
 - **Serial** (USB): Used for debugging (Serial Monitor)
-- **Serial1**: Used for XBee wireless communication
-  - Teensy 2.0: Pin 7 (RX), Pin 8 (TX)
-  - Teensy LC/3.x/4.x: Pin 0 (RX), Pin 1 (TX)
+- **Serial4**: Used for XBee wireless communication
+  - Check your Teensy model for Serial4 pin locations
 
 ## Troubleshooting
 

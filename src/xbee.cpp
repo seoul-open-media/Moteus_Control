@@ -11,10 +11,10 @@ extern volatile bool commandRunning;
 extern String pendingCommand;
 
 void initXBee() {
-  // Initialize Serial1 for XBee communication
-  Serial1.begin(XBEE_BAUD);
+  // Initialize Serial4 for XBee communication
+  Serial4.begin(XBEE_BAUD);
   
-  Serial.println(F("XBee initialized on Serial1"));
+  Serial.println(F("XBee initialized on Serial4"));
   Serial.print(F("Baud rate: "));
   Serial.println(XBEE_BAUD);
   
@@ -23,8 +23,8 @@ void initXBee() {
 
 void updateXBee() {
   // Check if data is available from XBee
-  if (Serial1.available()) {
-    String command = Serial1.readStringUntil('\n');
+  if (Serial4.available()) {
+    String command = Serial4.readStringUntil('\n');
     command.trim();
     
     if (command.length() > 0) {
@@ -49,8 +49,8 @@ bool parseXBeeCommand(String command) {
   command.trim();
   
   // Echo command back to XBee (for Pure Data confirmation)
-  Serial1.print(F("ACK: "));
-  Serial1.println(command);
+  Serial4.print(F("ACK: "));
+  Serial4.println(command);
   
   // Parse different command formats from Pure Data
   
@@ -147,14 +147,14 @@ bool parseXBeeCommand(String command) {
     const auto& v2 = moteus2.last_result().values;
     
     // Send status back to Pure Data
-    Serial1.print(F("STATUS M1:"));
-    Serial1.print(v1.abs_position, 4);
-    Serial1.print(F(" T:"));
-    Serial1.print(v1.motor_temperature, 1);
-    Serial1.print(F(" M2:"));
-    Serial1.print(v2.abs_position, 4);
-    Serial1.print(F(" T:"));
-    Serial1.println(v2.motor_temperature, 1);
+    Serial4.print(F("STATUS M1:"));
+    Serial4.print(v1.abs_position, 4);
+    Serial4.print(F(" T:"));
+    Serial4.print(v1.motor_temperature, 1);
+    Serial4.print(F(" M2:"));
+    Serial4.print(v2.abs_position, 4);
+    Serial4.print(F(" T:"));
+    Serial4.println(v2.motor_temperature, 1);
     
     return true;
   }
@@ -172,8 +172,8 @@ bool parseXBeeCommand(String command) {
   Serial.print(F("XBee: Unknown command: "));
   Serial.println(command);
   
-  Serial1.print(F("ERROR: Unknown command: "));
-  Serial1.println(command);
+  Serial4.print(F("ERROR: Unknown command: "));
+  Serial4.println(command);
   
   return false;
 }

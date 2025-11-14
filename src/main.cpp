@@ -56,7 +56,7 @@ void setup() {
   // Initialize NeoKey on Wire (I2C bus 0)
   initNeoKey();
   
-  // Initialize XBee on Serial1
+  // Initialize XBee on Serial4
   initXBee();
 
   SPI.begin();
