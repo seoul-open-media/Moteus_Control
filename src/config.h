@@ -10,6 +10,14 @@ static const byte MCP2517_SDO = 12;  // SDO output of MCP2517
 static const byte MCP2517_CS  = 10;  // CS input of MCP2517
 
 //——————————————————————————————————————————————————————————————————————————————
+//  OLED Display Configuration - Using Wire1 I2C bus
+//——————————————————————————————————————————————————————————————————————————————
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1        // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS 0x3C  // I2C address (0x3C or 0x3D)
+
+//——————————————————————————————————————————————————————————————————————————————
 //  Motor Configuration
 //——————————————————————————————————————————————————————————————————————————————
 static const double MOTOR1_DIRECTION = 1.0;   // 1.0 = normal, -1.0 = reversed

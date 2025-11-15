@@ -7,6 +7,7 @@
 volatile bool interruptCommand = false;
 volatile bool commandRunning = false;
 String pendingCommand = "";
+unsigned long lastXBeeCommand = 0;
 
 void printDiagnostics() {
   const auto& v1 = moteus1.last_result().values;
@@ -446,8 +447,10 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
             }
           }
           double error_distance = abs(target_ext1 - current_ext1);
-          // Only trigger if: encoder stuck AND far from target AND commanding velocity
-          if (stuck1 && error_distance > BRAKE_ZONE && abs(position_cmd1.velocity) > 1.0) {
+          // Disable stall detection for 5 seconds after XBee command (allows smooth position updates)
+          bool xbee_active = (millis() - lastXBeeCommand) < 5000;
+          // Only trigger if: encoder stuck AND far from target AND commanding velocity AND not recent XBee
+          if (stuck1 && error_distance > BRAKE_ZONE && abs(position_cmd1.velocity) > 1.0 && !xbee_active) {
             // Get additional motor diagnostics
             const auto& motor_state = moteus1.last_result().values;
             
@@ -552,8 +555,10 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
             }
           }
           double error_distance = abs(target_ext2 - current_ext2);
-          // Only trigger if: encoder stuck AND far from target AND commanding velocity
-          if (stuck2 && error_distance > BRAKE_ZONE && abs(position_cmd2.velocity) > 1.0) {
+          // Disable stall detection for 5 seconds after XBee command (allows smooth position updates)
+          bool xbee_active = (millis() - lastXBeeCommand) < 5000;
+          // Only trigger if: encoder stuck AND far from target AND commanding velocity AND not recent XBee
+          if (stuck2 && error_distance > BRAKE_ZONE && abs(position_cmd2.velocity) > 1.0 && !xbee_active) {
             // Get additional motor diagnostics
             const auto& motor_state = moteus2.last_result().values;
             
@@ -682,12 +687,13 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       if (motor1_done && motor2_done) {
         Serial.println(F("Both motors reached target!"));
         displayDebug("Target reached!");
-        for (int i = 0; i < 5; i++) {
-          moteus1.SetStop();
-          moteus2.SetStop();
-          unsigned long stop_start = millis();
-          while (millis() - stop_start < 10) {}
-        }
+        
+        // Set velocity to 0 to hold position instead of stopping
+        position_cmd1.velocity = 0;
+        position_cmd2.velocity = 0;
+        moteus1.SetPosition(position_cmd1, &position_fmt);
+        moteus2.SetPosition(position_cmd2, &position_fmt);
+        
         commandRunning = false;
         break;
       }
@@ -698,8 +704,12 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       Serial.println(F("Timeout!"));
       displayDebug("Timeout!");
       commandRunning = false;
-      moteus1.SetStop();
-      moteus2.SetStop();
+      
+      // Set velocity to 0 to hold current position
+      position_cmd1.velocity = 0;
+      position_cmd2.velocity = 0;
+      moteus1.SetPosition(position_cmd1, &position_fmt);
+      moteus2.SetPosition(position_cmd2, &position_fmt);
       break;
     }
   }

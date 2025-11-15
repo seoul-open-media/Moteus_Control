@@ -10,6 +10,21 @@ extern volatile bool interruptCommand;
 extern volatile bool commandRunning;
 extern String pendingCommand;
 
+// XBee control state
+bool xbeeControlActive = false;
+float xbeeTargetM1 = 0.0;
+float xbeeTargetM2 = 0.0;
+bool m1_settled = false;
+bool m2_settled = false;
+
+// Position constraints: -90 to +90 degrees = -0.25 to +0.25 revolutions
+const float MIN_POSITION = -0.25;
+const float MAX_POSITION = 0.25;
+
+// Motor velocity limits (adjustable via XBee)
+float xbeeMaxVelM1 = 400.0;  // Default max velocity for M1
+float xbeeMaxVelM2 = 400.0;  // Default max velocity for M2
+
 void initXBee() {
   // Initialize Serial4 for XBee communication
   Serial4.begin(XBEE_BAUD);
@@ -24,22 +39,126 @@ void initXBee() {
 void updateXBee() {
   // Check if data is available from XBee
   if (Serial4.available()) {
-    String command = Serial4.readStringUntil('\n');
-    command.trim();
+    // Look for packet header (0xFF = 255)
+    uint8_t header = Serial4.read();
     
-    if (command.length() > 0) {
-      Serial.print(F("XBee received: "));
-      Serial.println(command);
+    if (header == 0xFF) {
+      // Wait for command byte
+      unsigned long startTime = millis();
+      while (!Serial4.available() && (millis() - startTime < 100)) {}
       
-      // If a command is currently running, set interrupt flag
-      if (commandRunning) {
-        pendingCommand = command;
-        interruptCommand = true;
-        Serial.println(F("Interrupting current command via XBee"));
-        displayDebug("XBee interrupt");
-      } else {
-        // Parse and execute command immediately
-        parseXBeeCommand(command);
+      if (Serial4.available()) {
+        uint8_t cmd = Serial4.read();
+        
+        // Parse binary commands
+        if (cmd == 0x01 || cmd == 0x02) { // Move Motor (1 or 2)
+          // Read 3 bytes: position_MSB, position_LSB, velocity
+          while (Serial4.available() < 3 && (millis() - startTime < 100)) {}
+          if (Serial4.available() >= 3) {
+            int16_t rawPos = (Serial4.read() << 8) | Serial4.read();
+            uint8_t rawVel = Serial4.read();
+            
+            // Convert position
+            float target = rawPos / 65535.0;
+            target += 0.5;  // Add 180 degree offset
+            if (target > 0.5) target -= 1.0;  // Wrap around
+            target = constrain(target, MIN_POSITION, MAX_POSITION);
+            
+            // Convert velocity (0-255 maps to 1-500 rev/s)
+            float velocity = 1.0 + (rawVel / 255.0) * 499.0;
+            
+            // Mark timestamp for stall detection
+            lastXBeeCommand = millis();
+            
+            // Update motor target and velocity
+            if (cmd == 0x01) {
+              xbeeTargetM1 = target;
+              xbeeMaxVelM1 = velocity;
+              m1_settled = false;
+              Serial.print(F("M1: pos="));
+              Serial.print(target, 3);
+              Serial.print(F(" vel="));
+              Serial.println(velocity, 1);
+            } else {
+              xbeeTargetM2 = target;
+              xbeeMaxVelM2 = velocity;
+              m2_settled = false;
+              Serial.print(F("M2: pos="));
+              Serial.print(target, 3);
+              Serial.print(F(" vel="));
+              Serial.println(velocity, 1);
+            }
+            
+            xbeeControlActive = true;
+          }
+        }
+        else if (cmd == 0x03) { // Move Both Motors
+          // Read 4 bytes (2 per motor)
+          while (Serial4.available() < 4 && (millis() - startTime < 100)) {}
+          if (Serial4.available() >= 4) {
+            int16_t rawPos1 = (Serial4.read() << 8) | Serial4.read();
+            int16_t rawPos2 = (Serial4.read() << 8) | Serial4.read();
+            float target1 = rawPos1 / 65535.0;
+            float target2 = rawPos2 / 65535.0;
+            
+            Serial.print(F("XBee: Both M1->"));
+            Serial.print(target1, 4);
+            Serial.print(F(" M2->"));
+            Serial.println(target2, 4);
+            
+            char buf[32];
+            snprintf(buf, sizeof(buf), "XB:%.2f,%.2f", target1, target2);
+            displayDebug(buf);
+            
+            moveToEncoderPosition(target1, target2);
+          }
+        }
+        else if (cmd == 0x04) { // STOP/KILL
+          Serial.println(F("XBee: Emergency STOP"));
+          displayDebug("XBee STOP!");
+          
+          moteus1.SetStop();
+          moteus2.SetStop();
+          
+          // Disable XBee control loop
+          xbeeControlActive = false;
+          m1_settled = false;
+          m2_settled = false;
+          
+          interruptCommand = true;
+          commandRunning = false;
+        }
+        else if (cmd == 0x05) { // STATUS
+          Moteus::Query::Format query_fmt;
+          query_fmt.abs_position = Moteus::kFloat;
+          query_fmt.motor_temperature = Moteus::kFloat;
+          
+          moteus1.SetQuery(&query_fmt);
+          moteus2.SetQuery(&query_fmt);
+          delay(10);
+          
+          const auto& v1 = moteus1.last_result().values;
+          const auto& v2 = moteus2.last_result().values;
+          
+          // Send status back as binary: FF 05 [M1 pos 4 bytes] [M1 temp 2 bytes] [M2 pos 4 bytes] [M2 temp 2 bytes]
+          Serial4.write(0xFF);
+          Serial4.write(0x05);
+          Serial4.write((uint8_t*)&v1.abs_position, 4);
+          int16_t temp1 = (int16_t)(v1.motor_temperature * 10);
+          Serial4.write((uint8_t*)&temp1, 2);
+          Serial4.write((uint8_t*)&v2.abs_position, 4);
+          int16_t temp2 = (int16_t)(v2.motor_temperature * 10);
+          Serial4.write((uint8_t*)&temp2, 2);
+          
+          Serial.print(F("XBee: STATUS sent M1:"));
+          Serial.print(v1.abs_position, 4);
+          Serial.print(F(" M2:"));
+          Serial.println(v2.abs_position, 4);
+        }
+        else {
+          Serial.print(F("XBee: Unknown command: 0x"));
+          Serial.println(cmd, HEX);
+        }
       }
     }
   }
@@ -176,4 +295,134 @@ bool parseXBeeCommand(String command) {
   Serial4.println(command);
   
   return false;
+}
+
+// Continuous XBee control - call from main loop
+void updateXBeeControl() {
+  if (!xbeeControlActive) return;
+  
+  static unsigned long lastUpdate = 0;
+  if (millis() - lastUpdate < 10) return;  // 100Hz update rate
+  lastUpdate = millis();
+  
+  // Query current positions and velocities
+  Moteus::Query::Format query_fmt;
+  query_fmt.abs_position = Moteus::kFloat;
+  query_fmt.velocity = Moteus::kFloat;
+  moteus1.SetQuery(&query_fmt);
+  moteus2.SetQuery(&query_fmt);
+  delay(5);
+  
+  float currentM1 = moteus1.last_result().values.abs_position;
+  float currentM2 = moteus2.last_result().values.abs_position;
+  float velM1 = moteus1.last_result().values.velocity;
+  float velM2 = moteus2.last_result().values.velocity;
+  
+  // Calculate errors
+  float error1 = xbeeTargetM1 - currentM1;
+  float error2 = xbeeTargetM2 - currentM2;
+  
+  // Handle wrap-around
+  if (error1 > 0.5) error1 -= 1.0;
+  else if (error1 < -0.5) error1 += 1.0;
+  if (error2 > 0.5) error2 -= 1.0;
+  else if (error2 < -0.5) error2 += 1.0;
+  
+  const float deadband = 0.01;  // Small deadband for responsive tracking (~3.6 degrees)
+  const float brake_zone = 0.03;  // Small brake zone - switch to gentle control sooner
+  
+  // Use per-motor velocity limits
+  float max_vel_m1 = xbeeMaxVelM1;
+  float max_vel_m2 = xbeeMaxVelM2;
+  
+  // Scale PD gains with velocity (base gains for 400 rev/s)
+  // Use square root scaling for P gain, but keep D gain higher at low speeds
+  float vel_scale_m1 = sqrt(max_vel_m1 / 400.0);
+  float vel_scale_m2 = sqrt(max_vel_m2 / 400.0);
+  
+  // At slow speeds, use higher damping to prevent overshoot
+  // Minimum Kd = 15 even at slowest speeds
+  float Kp_far_m1 = 2400.0 * vel_scale_m1;
+  float Kp_near_m1 = 800.0 * vel_scale_m1;
+  float Kd_m1 = max(15.0, 10.0 * vel_scale_m1);
+  
+  float Kp_far_m2 = 2400.0 * vel_scale_m2;
+  float Kp_near_m2 = 800.0 * vel_scale_m2;
+  float Kd_m2 = max(15.0, 10.0 * vel_scale_m2);
+  
+  // Calculate velocities with PD control
+  float vel1 = 0, vel2 = 0;
+  
+  // Motor 1 control
+  bool m1_active = abs(error1) > deadband;
+  bool m2_active = abs(error2) > deadband;
+  
+  // Check if motors have settled
+  if (!m1_active && !m1_settled) {
+    m1_settled = true;
+    Serial.println(F("M1 settled"));
+  } else if (m1_active && m1_settled) {
+    m1_settled = false;  // Left deadband, no longer settled
+  }
+  
+  if (!m2_active && !m2_settled) {
+    m2_settled = true;
+    Serial.println(F("M2 settled"));
+  } else if (m2_active && m2_settled) {
+    m2_settled = false;
+  }
+  
+  // Calculate velocities for active motors
+  if (m1_active) {
+    if (abs(error1) > brake_zone) {
+      // Far from target - fast approach
+      vel1 = error1 * Kp_far_m1 - velM1 * Kd_m1;
+    } else {
+      // Close to target - gentle approach
+      vel1 = error1 * Kp_near_m1 - velM1 * (Kd_m1 * 1.5);
+    }
+    vel1 = constrain(vel1, -max_vel_m1, max_vel_m1);
+  }
+  
+  // Motor 2 control
+  if (m2_active) {
+    if (abs(error2) > brake_zone) {
+      vel2 = error2 * Kp_far_m2 - velM2 * Kd_m2;
+    } else {
+      vel2 = error2 * Kp_near_m2 - velM2 * (Kd_m2 * 1.5);
+    }
+    vel2 = constrain(vel2, -max_vel_m2, max_vel_m2);
+  }
+  
+  // Always send commands to keep motors engaged
+  // When settled, just send velocity=0 to hold in place
+  // Scale acceleration with velocity: accel = velocity * 0.3
+  Moteus::PositionMode::Command cmd1;
+  cmd1.position = NaN;
+  cmd1.velocity = m1_settled ? 0.0 : vel1;
+  cmd1.velocity_limit = max_vel_m1;
+  cmd1.accel_limit = max_vel_m1 * 0.3;  // Acceleration scales with velocity
+  
+  Moteus::PositionMode::Command cmd2;
+  cmd2.position = NaN;
+  cmd2.velocity = m2_settled ? 0.0 : vel2;
+  cmd2.velocity_limit = max_vel_m2;
+  cmd2.accel_limit = max_vel_m2 * 0.3;  // Acceleration scales with velocity
+  
+  // Debug output every 1 second
+  static unsigned long lastDebug = 0;
+  if (millis() - lastDebug > 1000) {
+    Serial.print(F("M1: vel_lim="));
+    Serial.print(max_vel_m1, 1);
+    Serial.print(F(" accel="));
+    Serial.print(cmd1.accel_limit, 1);
+    Serial.print(F(" | M2: vel_lim="));
+    Serial.print(max_vel_m2, 1);
+    Serial.print(F(" accel="));
+    Serial.println(cmd2.accel_limit, 1);
+    lastDebug = millis();
+  }
+  
+  moteus1.SetPosition(cmd1, &position_fmt);
+  moteus2.SetPosition(cmd2, &position_fmt);
 }

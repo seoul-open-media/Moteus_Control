@@ -1,0 +1,30 @@
+#N canvas 0 0 800 600 12;
+#X text 50 30 SLIDER TO ASCII BYTES TEST;
+#X text 50 60 Test if [list fromsymbol] works in your PD version;
+#X obj 100 120 hsl 200 20 0 100 0 0 empty empty Slider -2 -10 0 12
+#dcdcdc #000000 #000000 0 1;
+#X obj 100 150 nbx 5 14 0 100 0 0 empty empty empty 0 -10 0 12 #dcdcdc
+#000000 #000000 0 256;
+#X obj 100 180 makefilename M1 %.2f;
+#X obj 100 210 list fromsymbol;
+#X obj 100 240 list append 10;
+#X obj 100 270 print BYTES;
+#X text 400 120 Move the slider;
+#X text 400 140 You should see bytes in console like:;
+#X text 400 160 BYTES: 77 49 32 48 46 53 48 10;
+#X text 400 180 (that's "M1 0.50" as ASCII + newline);
+#X text 50 320 === COMPARISON: HARDCODED BYTES ===;
+#X msg 100 350 77 49 32 48 10;
+#X obj 100 380 print HARDCODED;
+#X text 250 350 <- Click this (should print same bytes);
+#X text 50 430 If you see bytes from slider: [list fromsymbol] works!
+;
+#X text 50 450 If you see nothing: [list fromsymbol] not available
+;
+#X text 50 480 In that case \, use hardcoded preset buttons only.;
+#X connect 2 0 3 0;
+#X connect 3 0 4 0;
+#X connect 4 0 5 0;
+#X connect 5 0 6 0;
+#X connect 6 0 7 0;
+#X connect 13 0 14 0;

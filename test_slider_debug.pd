@@ -1,0 +1,34 @@
+#N canvas 0 0 900 600 12;
+#X text 50 30 SLIDER TO ASCII DEBUG TEST;
+#X obj 100 100 hsl 200 20 -0.5 0.5 0 0 empty empty Slider -2 -10 0
+12 #dcdcdc #000000 #000000 0 1;
+#X obj 100 130 nbx 5 14 -0.5 0.5 0 0 empty empty empty 0 -10 0 12 #dcdcdc
+#000000 #000000 0 256;
+#X text 50 60 Move slider and check what each step produces:;
+#X obj 100 160 t f f;
+#X obj 100 190 makefilename M1 %.2f;
+#X obj 200 190 print RAW_NUMBER;
+#X obj 100 220 print TEXT_STRING;
+#X obj 100 250 list fromsymbol;
+#X obj 100 280 print BYTES;
+#X obj 100 310 list append 10;
+#X obj 100 340 print WITH_NEWLINE;
+#X text 400 100 Step 1: RAW_NUMBER = your slider value;
+#X text 400 130 Step 2: TEXT_STRING = "M1 0.25" or similar;
+#X text 400 160 Step 3: BYTES = ASCII bytes of the text;
+#X text 400 190 Step 4: WITH_NEWLINE = bytes + 10 at end;
+#X text 50 400 === WHAT WE EXPECT ===;
+#X text 50 420 For value 0.25:;
+#X text 50 440 TEXT_STRING: symbol M1 0.25;
+#X text 50 460 BYTES: 77 49 32 48 46 50 53;
+#X text 50 480 WITH_NEWLINE: 77 49 32 48 46 50 53 10;
+#X text 50 520 Tell me what you see for each step!;
+#X connect 1 0 2 0;
+#X connect 2 0 4 0;
+#X connect 4 0 5 0;
+#X connect 4 1 6 0;
+#X connect 5 0 7 0;
+#X connect 5 0 8 0;
+#X connect 8 0 9 0;
+#X connect 8 0 10 0;
+#X connect 10 0 11 0;

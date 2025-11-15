@@ -11,6 +11,12 @@ extern Moteus::PositionMode::Command position_cmd1;
 extern Moteus::PositionMode::Command position_cmd2;
 extern Moteus::PositionMode::Format position_fmt;
 
+// Global flag to interrupt current motor command
+extern volatile bool interruptCommand;
+extern volatile bool commandRunning;
+extern String pendingCommand;  // Store command that triggered interrupt
+extern unsigned long lastXBeeCommand;  // Timestamp of last XBee command
+
 // Function declarations
 void moveToEncoderPosition(double target_ext1, double target_ext2);
 void oscillateMotors();

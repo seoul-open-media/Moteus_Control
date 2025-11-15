@@ -154,6 +154,9 @@ void loop() {
   
   // Check XBee for wireless commands
   updateXBee();
+  
+  // Update XBee continuous control
+  updateXBeeControl();
 
   // Check if there's a pending command from interrupt
   String val = "";
