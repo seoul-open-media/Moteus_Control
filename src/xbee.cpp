@@ -43,124 +43,203 @@ void initXBee() {
 
 void updateXBee() {
   // Check if data is available from XBee
-  if (Serial4.available()) {
-    // Look for packet header (0xFF = 255)
-    uint8_t header = Serial4.read();
-    
-    if (header == 0xFF) {
-      // Wait for robot_id byte
-      unsigned long startTime = millis();
-      while (!Serial4.available() && (millis() - startTime < 100)) {}
+  // Search for header bytes (0xFF 0xFF) in the stream
+  static unsigned long lastDebugTime = 0;
+  if (Serial4.available() > 0 && (millis() - lastDebugTime > 500)) {
+    Serial.print(F("[XBee] Available bytes: "));
+    Serial.println(Serial4.available());
+    lastDebugTime = millis();
+  }
+  
+  // Wait for at least 2 bytes to check header
+  while (Serial4.available() >= 2) {
+      // Look for first header byte
+      uint8_t byte1 = Serial4.read();
+      if (byte1 != 0xFF) {
+        continue;  // Keep searching
+      }
       
-      if (Serial4.available()) {
-        uint8_t robot_id = Serial4.read();
-        
-        // Check if command is for this robot (or broadcast to all robots with ID 0)
-        if (robot_id != ROBOT_ID && robot_id != 0) {
-          // Command not for this robot, ignore it
-          return;
-        }
-        
-        // Wait for command byte
-        while (!Serial4.available() && (millis() - startTime < 100)) {}
-        if (!Serial4.available()) return;
-        
-        uint8_t cmd = Serial4.read();
-        
-        // Parse binary commands
-        if (cmd == 0x01 || cmd == 0x02) { // Move Motor (1 or 2)
-          // Read 3 bytes: position_MSB, position_LSB, velocity
-          while (Serial4.available() < 3 && (millis() - startTime < 100)) {}
-          if (Serial4.available() >= 3) {
-            int16_t rawPos = (Serial4.read() << 8) | Serial4.read();
-            uint8_t rawVel = Serial4.read();
-            
-            // Convert position
-            float target = rawPos / 65535.0;
-            target += 0.5;  // Add 180 degree offset
-            if (target > 0.5) target -= 1.0;  // Wrap around
-            target = constrain(target, MIN_POSITION, MAX_POSITION);
-            
-            // Convert velocity (0-255 maps to 1-500 rev/s)
-            float velocity = 1.0 + (rawVel / 255.0) * 499.0;
-            
-            // Mark timestamp for stall detection
-            lastXBeeCommand = millis();
-            
-            // Update motor target and velocity
-            if (cmd == 0x01) {
-              xbeeTargetM1 = target;
-              xbeeMaxVelM1 = velocity;
-              m1_settled = false;
-              Serial.print(F("Robot"));
-              Serial.print(ROBOT_ID);
-              Serial.print(F(" M1: pos="));
-              Serial.print(target, 3);
-              Serial.print(F(" vel="));
-              Serial.println(velocity, 1);
-            } else {
-              xbeeTargetM2 = target;
-              xbeeMaxVelM2 = velocity;
-              m2_settled = false;
-              Serial.print(F("Robot"));
-              Serial.print(ROBOT_ID);
-              Serial.print(F(" M2: pos="));
-              Serial.print(target, 3);
-              Serial.print(F(" vel="));
-              Serial.println(velocity, 1);
-            }
-            
-            xbeeControlActive = true;
-          }
-        }
-        else if (cmd == 0x04) { // STOP/KILL
-          Serial.println(F("XBee: Emergency STOP"));
-          displayDebug("XBee STOP!");
-          
-          moteus1.SetStop();
-          moteus2.SetStop();
-          
-          // Disable XBee control loop
-          xbeeControlActive = false;
-          m1_settled = false;
-          m2_settled = false;
-          
-          interruptCommand = true;
-          commandRunning = false;
-        }
-        else if (cmd == 0x05) { // STATUS
-          Moteus::Query::Format query_fmt;
-          query_fmt.abs_position = Moteus::kFloat;
-          query_fmt.motor_temperature = Moteus::kFloat;
-          
-          moteus1.SetQuery(&query_fmt);
-          moteus2.SetQuery(&query_fmt);
-          delay(10);
-          
-          const auto& v1 = moteus1.last_result().values;
-          const auto& v2 = moteus2.last_result().values;
-          
-          // Send status back as binary: FF 05 [M1 pos 4 bytes] [M1 temp 2 bytes] [M2 pos 4 bytes] [M2 temp 2 bytes]
-          Serial4.write(0xFF);
-          Serial4.write(0x05);
-          Serial4.write((uint8_t*)&v1.abs_position, 4);
-          int16_t temp1 = (int16_t)(v1.motor_temperature * 10);
-          Serial4.write((uint8_t*)&temp1, 2);
-          Serial4.write((uint8_t*)&v2.abs_position, 4);
-          int16_t temp2 = (int16_t)(v2.motor_temperature * 10);
-          Serial4.write((uint8_t*)&temp2, 2);
-          
-          Serial.print(F("XBee: STATUS sent M1:"));
-          Serial.print(v1.abs_position, 4);
-          Serial.print(F(" M2:"));
-          Serial.println(v2.abs_position, 4);
-        }
-        else {
-          Serial.print(F("XBee: Unknown command: 0x"));
-          Serial.println(cmd, HEX);
+      // Look for second header byte
+      uint8_t byte2 = Serial4.read();
+      if (byte2 != 0xFF) {
+        continue;  // Keep searching
+      }
+      
+      Serial.println(F("[XBee] Valid header found!"));
+      
+      // Now wait for the remaining 26 bytes
+      unsigned long startWait = millis();
+      while (Serial4.available() < 26 && (millis() - startWait < 100)) {
+        delay(1);  // Wait a bit for data
+      }
+      
+      if (Serial4.available() < 26) {
+        Serial.println(F("[XBee] Timeout waiting for data"));
+        return;
+      }
+
+      // Read 13 robots' MSB/LSB
+      uint8_t robot_data[26];
+      for (int i = 0; i < 26; ++i) {
+        robot_data[i] = Serial4.read();
+      }
+
+      // Broadcast: if all bytes are 0xFF, all robots should act
+      bool broadcast = true;
+      for (int i = 0; i < 26; ++i) {
+        if (robot_data[i] != 0xFF) {
+          broadcast = false;
+          break;
         }
       }
-    }
+
+      // Robot IDs are 1-13, index 0-12
+      int idx = ROBOT_ID - 1;
+      if ((ROBOT_ID >= 1 && ROBOT_ID <= 13) && (!broadcast)) {
+        uint8_t msb = robot_data[idx * 2];
+        uint8_t lsb = robot_data[idx * 2 + 1];
+        Serial.print(F("Robot "));
+        Serial.print(ROBOT_ID);
+        Serial.print(F(" MSB: "));
+        Serial.print(msb);
+        Serial.print(F(" LSB: "));
+        Serial.println(lsb);
+
+        uint16_t value = ((uint16_t)msb << 8) | lsb;
+        uint8_t digit1 = (value / 1000) % 10; // velocity
+        uint8_t digit2 = (value / 100) % 10;  // motor 1 position
+        uint8_t digit3 = (value / 10) % 10;   // motor 2 position
+        // uint8_t digit4 = value % 10;          // reserved
+
+        Serial.print(F("Parsed for Robot "));
+        Serial.print(ROBOT_ID);
+        Serial.print(F(" value: "));
+        Serial.print(value);
+        Serial.print(F(" digits: v="));
+        Serial.print(digit1);
+        Serial.print(F(" m1="));
+        Serial.print(digit2);
+        Serial.print(F(" m2="));
+        Serial.print(digit3);
+        Serial.println();
+
+        // Map velocity: digit1 0-9 maps to 50-500 rev/s (reasonable range)
+        float velocity = 50.0 + (digit1 / 9.0) * 450.0;
+        
+        // Map position: 0=stay, 1-4=negative range, 5=center, 6-9=positive range
+        float pos1, pos2;
+        if (digit2 == 0) {
+          pos1 = xbeeTargetM1;  // Keep current target
+        } else if (digit2 >= 1 && digit2 <= 4) {
+          pos1 = -0.25 + (digit2 - 1) * (0.25 / 3.0);  // Map 1-4 to -0.25 to 0
+        } else if (digit2 == 5) {
+          pos1 = 0.0;  // Center
+        } else {  // 6-9
+          pos1 = (digit2 - 6) * (0.25 / 3.0);  // Map 6-9 to 0 to 0.25
+        }
+        
+        if (digit3 == 0) {
+          pos2 = xbeeTargetM2;  // Keep current target
+        } else if (digit3 >= 1 && digit3 <= 4) {
+          pos2 = -0.25 + (digit3 - 1) * (0.25 / 3.0);  // Map 1-4 to -0.25 to 0
+        } else if (digit3 == 5) {
+          pos2 = 0.0;  // Center
+        } else {  // 6-9
+          pos2 = (digit3 - 6) * (0.25 / 3.0);  // Map 6-9 to 0 to 0.25
+        }
+        
+        // Clamp positions to safe range
+        pos1 = constrain(pos1, -0.25, 0.25);
+        pos2 = constrain(pos2, -0.25, 0.25);
+        
+        Serial.print(F("[Mapping] vel="));
+        Serial.print(velocity, 1);
+        Serial.print(F(" d2="));
+        Serial.print(digit2);
+        Serial.print(F(" -> pos1="));
+        Serial.print(pos1, 4);
+        Serial.print(F(" d3="));
+        Serial.print(digit3);
+        Serial.print(F(" -> pos2="));
+        Serial.println(pos2, 4);
+
+        lastXBeeCommand = millis();
+        xbeeTargetM1 = pos1;
+        xbeeTargetM2 = pos2;
+        xbeeMaxVelM1 = velocity;
+        xbeeMaxVelM2 = velocity;
+        m1_settled = false;
+        m2_settled = false;
+        xbeeControlActive = true;
+        
+        Serial.print(F("[XBee] Motor targets: M1="));
+        Serial.print(pos1, 3);
+        Serial.print(F(" M2="));
+        Serial.print(pos2, 3);
+        Serial.print(F(" vel="));
+        Serial.println(velocity, 1);
+      } else if (broadcast) {
+        // Example: broadcast command, all robots use the same value
+        uint8_t msb = robot_data[0];
+        uint8_t lsb = robot_data[1];
+        uint16_t value = ((uint16_t)msb << 8) | lsb;
+        uint8_t digit1 = (value / 1000) % 10; // velocity
+        uint8_t digit2 = (value / 100) % 10;  // motor 1 position
+        uint8_t digit3 = (value / 10) % 10;   // motor 2 position
+        // uint8_t digit4 = value % 10;          // reserved
+
+        // Map velocity: digit1 0-9 maps to 50-500 rev/s (reasonable range)
+        float velocity = 50.0 + (digit1 / 9.0) * 450.0;
+        
+        // Map position: 0=stay, 1-4=negative range, 5=center, 6-9=positive range
+        float pos1, pos2;
+        if (digit2 == 0) {
+          pos1 = xbeeTargetM1;  // Keep current target
+        } else if (digit2 >= 1 && digit2 <= 4) {
+          pos1 = -0.25 + (digit2 - 1) * (0.25 / 3.0);  // Map 1-4 to -0.25 to 0
+        } else if (digit2 == 5) {
+          pos1 = 0.0;  // Center
+        } else {  // 6-9
+          pos1 = (digit2 - 6) * (0.25 / 3.0);  // Map 6-9 to 0 to 0.25
+        }
+        
+        if (digit3 == 0) {
+          pos2 = xbeeTargetM2;  // Keep current target
+        } else if (digit3 >= 1 && digit3 <= 4) {
+          pos2 = -0.25 + (digit3 - 1) * (0.25 / 3.0);  // Map 1-4 to -0.25 to 0
+        } else if (digit3 == 5) {
+          pos2 = 0.0;  // Center
+        } else {  // 6-9
+          pos2 = (digit3 - 6) * (0.25 / 3.0);  // Map 6-9 to 0 to 0.25
+        }
+        
+        // Clamp positions to safe range
+        pos1 = constrain(pos1, -0.25, 0.25);
+        pos2 = constrain(pos2, -0.25, 0.25);
+        
+        Serial.print(F("[Broadcast Mapping] vel="));
+        Serial.print(velocity, 1);
+        Serial.print(F(" d2="));
+        Serial.print(digit2);
+        Serial.print(F(" -> pos1="));
+        Serial.print(pos1, 4);
+        Serial.print(F(" d3="));
+        Serial.print(digit3);
+        Serial.print(F(" -> pos2="));
+        Serial.println(pos2, 4);
+
+        lastXBeeCommand = millis();
+        xbeeTargetM1 = pos1;
+        xbeeTargetM2 = pos2;
+        xbeeMaxVelM1 = velocity;
+        xbeeMaxVelM2 = velocity;
+        m1_settled = false;
+        m2_settled = false;
+        xbeeControlActive = true;
+      }
+      
+      // Successfully processed a complete message
+      break;
   }
 }
 
@@ -302,8 +381,11 @@ void updateXBeeControl() {
   if (!xbeeControlActive) return;
   
   static unsigned long lastUpdate = 0;
+  static unsigned long lastDebug = 0;
   if (millis() - lastUpdate < 10) return;  // 100Hz update rate
   lastUpdate = millis();
+  
+  bool shouldDebug = (millis() - lastDebug > 1000);
   
   // Query current positions and velocities
   Moteus::Query::Format query_fmt;
@@ -322,12 +404,18 @@ void updateXBeeControl() {
   float error1 = xbeeTargetM1 - currentM1;
   float error2 = xbeeTargetM2 - currentM2;
   
-  
   // Handle wrap-around
   if (error1 > 0.5) error1 -= 1.0;
   else if (error1 < -0.5) error1 += 1.0;
   if (error2 > 0.5) error2 -= 1.0;
   else if (error2 < -0.5) error2 += 1.0;
+  
+  if (shouldDebug) {
+    Serial.print(F("[Err] M1: err="));
+    Serial.print(error1, 3);
+    Serial.print(F(" M2: err="));
+    Serial.println(error2, 3);
+  }
   
   const float deadband = 0.01;  // Small deadband for responsive tracking (~3.6 degrees)
   const float brake_zone = 0.03;  // Small brake zone - switch to gentle control sooner
@@ -336,20 +424,27 @@ void updateXBeeControl() {
   float max_vel_m1 = xbeeMaxVelM1;
   float max_vel_m2 = xbeeMaxVelM2;
   
-  // Scale PD gains with velocity (base gains for 400 rev/s)
-  // Use square root scaling for P gain, but keep D gain higher at low speeds
-  float vel_scale_m1 = sqrt(max_vel_m1 / 400.0);
-  float vel_scale_m2 = sqrt(max_vel_m2 / 400.0);
+  if (shouldDebug) {
+    Serial.print(F("[Vel] max_vel_m1="));
+    Serial.print(max_vel_m1, 1);
+    Serial.print(F(" max_vel_m2="));
+    Serial.println(max_vel_m2, 1);
+  }
   
-  // At slow speeds, use higher damping to prevent overshoot
-  // Minimum Kd = 15 even at slowest speeds
-  float Kp_far_m1 = 2400.0 * vel_scale_m1;
-  float Kp_near_m1 = 800.0 * vel_scale_m1;
-  float Kd_m1 = max(15.0, 10.0 * vel_scale_m1);
+  // Scale PD gains with velocity - use LINEAR scaling so velocity limit matters
+  // Much lower P gains so velocity naturally scales with max_vel setting
+  float vel_scale_m1 = max_vel_m1 / 400.0;  // Linear scaling
+  float vel_scale_m2 = max_vel_m2 / 400.0;
   
-  float Kp_far_m2 = 2400.0 * vel_scale_m2;
-  float Kp_near_m2 = 800.0 * vel_scale_m2;
-  float Kd_m2 = max(15.0, 10.0 * vel_scale_m2);
+  // Very low P gains: error of 0.25 rev (90°) should give ~0.5 × max_vel
+  // This ensures velocity scales with velocity digit, not always saturated
+  float Kp_far_m1 = max_vel_m1 * 2.0;   // Far: error of 0.5 rev (180°) -> max_vel
+  float Kp_near_m1 = max_vel_m1 * 1.0;  // Near: error of 1.0 rev (360°) -> max_vel
+  float Kd_m1 = max(2.0, 1.5 * vel_scale_m1);
+  
+  float Kp_far_m2 = max_vel_m2 * 2.0;
+  float Kp_near_m2 = max_vel_m2 * 1.0;
+  float Kd_m2 = max(2.0, 1.5 * vel_scale_m2);
   
   // Calculate velocities with PD control
   float vel1 = 0, vel2 = 0;
@@ -361,12 +456,14 @@ void updateXBeeControl() {
   // Check if motors have settled
   if (!m1_active && !m1_settled) {
     m1_settled = true;
+    Serial.println(F("M1 settled"));
   } else if (m1_active && m1_settled) {
     m1_settled = false;  // Left deadband, no longer settled
   }
   
   if (!m2_active && !m2_settled) {
     m2_settled = true;
+    Serial.println(F("M2 settled"));
   } else if (m2_active && m2_settled) {
     m2_settled = false;
   }
@@ -393,20 +490,33 @@ void updateXBeeControl() {
     vel2 = constrain(vel2, -max_vel_m2, max_vel_m2);
   }
   
+  if (shouldDebug) {
+    Serial.print(F("[Calc] vel1="));
+    Serial.print(vel1, 2);
+    Serial.print(F(" (lim="));
+    Serial.print(max_vel_m1, 0);
+    Serial.print(F(") vel2="));
+    Serial.print(vel2, 2);
+    Serial.print(F(" (lim="));
+    Serial.print(max_vel_m2, 0);
+    Serial.println(F(")"));
+    lastDebug = millis();
+  }
+  
   // Always send commands to keep motors engaged
   // When settled, just send velocity=0 to hold in place
-  // Scale acceleration with velocity: accel = velocity * 0.3
+  // Use HIGH CONSTANT acceleration so motors reach target velocity quickly
   Moteus::PositionMode::Command cmd1;
   cmd1.position = NaN;
   cmd1.velocity = m1_settled ? 0.0 : vel1;
   cmd1.velocity_limit = max_vel_m1;
-  cmd1.accel_limit = max_vel_m1 * 0.3;  // Acceleration scales with velocity
+  cmd1.accel_limit = 800.0;  // High constant acceleration - same for all velocities
   
   Moteus::PositionMode::Command cmd2;
   cmd2.position = NaN;
   cmd2.velocity = m2_settled ? 0.0 : vel2;
   cmd2.velocity_limit = max_vel_m2;
-  cmd2.accel_limit = max_vel_m2 * 0.3;  // Acceleration scales with velocity
+  cmd2.accel_limit = 800.0;  // High constant acceleration - same for all velocities
   
   moteus1.SetPosition(cmd1, &position_fmt);
   moteus2.SetPosition(cmd2, &position_fmt);
