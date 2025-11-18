@@ -1,6 +1,7 @@
 #include "xbee.h"
 #include "motor_control.h"
 #include "display.h"
+#include "config.h"
 #include <Moteus.h>
 
 // External declarations from main.cpp
@@ -30,10 +31,14 @@ void initXBee() {
   Serial4.begin(XBEE_BAUD);
   
   Serial.println(F("XBee initialized on Serial4"));
+  Serial.print(F("Robot ID: "));
+  Serial.println(ROBOT_ID);
   Serial.print(F("Baud rate: "));
   Serial.println(XBEE_BAUD);
   
-  displayDebug("XBee ready");
+  char buf[32];
+  snprintf(buf, sizeof(buf), "Robot #%d", ROBOT_ID);
+  displayDebug(buf);
 }
 
 void updateXBee() {
@@ -43,11 +48,23 @@ void updateXBee() {
     uint8_t header = Serial4.read();
     
     if (header == 0xFF) {
-      // Wait for command byte
+      // Wait for robot_id byte
       unsigned long startTime = millis();
       while (!Serial4.available() && (millis() - startTime < 100)) {}
       
       if (Serial4.available()) {
+        uint8_t robot_id = Serial4.read();
+        
+        // Check if command is for this robot (or broadcast to all robots with ID 0)
+        if (robot_id != ROBOT_ID && robot_id != 0) {
+          // Command not for this robot, ignore it
+          return;
+        }
+        
+        // Wait for command byte
+        while (!Serial4.available() && (millis() - startTime < 100)) {}
+        if (!Serial4.available()) return;
+        
         uint8_t cmd = Serial4.read();
         
         // Parse binary commands
@@ -75,7 +92,9 @@ void updateXBee() {
               xbeeTargetM1 = target;
               xbeeMaxVelM1 = velocity;
               m1_settled = false;
-              Serial.print(F("M1: pos="));
+              Serial.print(F("Robot"));
+              Serial.print(ROBOT_ID);
+              Serial.print(F(" M1: pos="));
               Serial.print(target, 3);
               Serial.print(F(" vel="));
               Serial.println(velocity, 1);
@@ -83,34 +102,15 @@ void updateXBee() {
               xbeeTargetM2 = target;
               xbeeMaxVelM2 = velocity;
               m2_settled = false;
-              Serial.print(F("M2: pos="));
+              Serial.print(F("Robot"));
+              Serial.print(ROBOT_ID);
+              Serial.print(F(" M2: pos="));
               Serial.print(target, 3);
               Serial.print(F(" vel="));
               Serial.println(velocity, 1);
             }
             
             xbeeControlActive = true;
-          }
-        }
-        else if (cmd == 0x03) { // Move Both Motors
-          // Read 4 bytes (2 per motor)
-          while (Serial4.available() < 4 && (millis() - startTime < 100)) {}
-          if (Serial4.available() >= 4) {
-            int16_t rawPos1 = (Serial4.read() << 8) | Serial4.read();
-            int16_t rawPos2 = (Serial4.read() << 8) | Serial4.read();
-            float target1 = rawPos1 / 65535.0;
-            float target2 = rawPos2 / 65535.0;
-            
-            Serial.print(F("XBee: Both M1->"));
-            Serial.print(target1, 4);
-            Serial.print(F(" M2->"));
-            Serial.println(target2, 4);
-            
-            char buf[32];
-            snprintf(buf, sizeof(buf), "XB:%.2f,%.2f", target1, target2);
-            displayDebug(buf);
-            
-            moveToEncoderPosition(target1, target2);
           }
         }
         else if (cmd == 0x04) { // STOP/KILL
@@ -322,6 +322,7 @@ void updateXBeeControl() {
   float error1 = xbeeTargetM1 - currentM1;
   float error2 = xbeeTargetM2 - currentM2;
   
+  
   // Handle wrap-around
   if (error1 > 0.5) error1 -= 1.0;
   else if (error1 < -0.5) error1 += 1.0;
@@ -360,14 +361,12 @@ void updateXBeeControl() {
   // Check if motors have settled
   if (!m1_active && !m1_settled) {
     m1_settled = true;
-    Serial.println(F("M1 settled"));
   } else if (m1_active && m1_settled) {
     m1_settled = false;  // Left deadband, no longer settled
   }
   
   if (!m2_active && !m2_settled) {
     m2_settled = true;
-    Serial.println(F("M2 settled"));
   } else if (m2_active && m2_settled) {
     m2_settled = false;
   }
@@ -408,20 +407,6 @@ void updateXBeeControl() {
   cmd2.velocity = m2_settled ? 0.0 : vel2;
   cmd2.velocity_limit = max_vel_m2;
   cmd2.accel_limit = max_vel_m2 * 0.3;  // Acceleration scales with velocity
-  
-  // Debug output every 1 second
-  static unsigned long lastDebug = 0;
-  if (millis() - lastDebug > 1000) {
-    Serial.print(F("M1: vel_lim="));
-    Serial.print(max_vel_m1, 1);
-    Serial.print(F(" accel="));
-    Serial.print(cmd1.accel_limit, 1);
-    Serial.print(F(" | M2: vel_lim="));
-    Serial.print(max_vel_m2, 1);
-    Serial.print(F(" accel="));
-    Serial.println(cmd2.accel_limit, 1);
-    lastDebug = millis();
-  }
   
   moteus1.SetPosition(cmd1, &position_fmt);
   moteus2.SetPosition(cmd2, &position_fmt);

@@ -1,10 +1,10 @@
-#N canvas 1460 1106 1000 800 12;
+#N canvas 1849 1122 1000 800 12;
 #X text 50 20 XBee Motor Control - Unified Command;
 #X text 50 45 Format: 255 motor_num pos_MSB pos_LSB velocity;
 #X text 50 70 Motor 1;
 #X obj 80 100 hsl 200 15 -0.25 0.25 0 0 empty empty M1_Position -2 -8 0 10 #fcfcfc #000000 #000000 0 1;
 #X obj 80 120 nbx 8 14 -0.25 0.25 0 0 empty empty empty 0 -8 0 10 #fcfcfc #000000 #000000 0 256;
-#X obj 80 150 hsl 200 15 1 500 0 0 empty empty M1_Velocity_rev/s -2 -8 0 10 #00ff00 #ff8800 #000000 0 1;
+#X obj 80 150 hsl 200 15 1 100 0 0 empty empty M1_Velocity_rev/s -2 -8 0 10 #00ff00 #ff8800 #000000 0 1;
 #X obj 80 170 nbx 5 14 1 500 0 0 empty empty empty 0 -8 0 10 #fcfcfc #000000 #000000 0 256;
 #X text 300 150 Motor speed: 1-500 rev/s;
 #X obj 82 236 * 65535;
@@ -22,7 +22,7 @@
 #X text 50 460 Motor 2;
 #X obj 80 490 hsl 200 15 -0.25 0.25 0 0 empty empty M2_Position -2 -8 0 10 #fcfcfc #000000 #000000 0 1;
 #X obj 80 510 nbx 8 14 -0.25 0.25 0 0 empty empty empty 0 -8 0 10 #fcfcfc #000000 #000000 0 256;
-#X obj 80 540 hsl 200 15 1 500 0 0 empty empty M2_Velocity_rev/s -2 -8 0 10 #00ff00 #ff8800 #000000 0 1;
+#X obj 80 540 hsl 200 15 1 100 0 0 empty empty M2_Velocity_rev/s -2 -8 0 10 #00ff00 #ff8800 #000000 0 1;
 #X obj 78 561 nbx 5 14 1 500 0 0 empty empty empty 0 -8 0 10 #fcfcfc #000000 #000000 0 256;
 #X text 300 540 Motor speed: 1-500 rev/s;
 #X obj 82 626 * 65535;
@@ -99,6 +99,7 @@
 #X obj 245 314 / 499;
 #X floatatom 273 393 5 0 0 0 - - - 0;
 #X obj 242 651 - 1;
+#X msg 281 614 1;
 #X connect 3 0 4 0;
 #X connect 4 0 39 0;
 #X connect 5 0 6 0;
@@ -120,7 +121,7 @@
 #X connect 21 0 22 0;
 #X connect 22 0 40 0;
 #X connect 23 0 24 0;
-#X connect 24 0 78 1;
+#X connect 24 0 78 0;
 #X connect 26 0 28 0;
 #X connect 27 0 26 0;
 #X connect 28 0 29 0;
@@ -155,3 +156,4 @@
 #X connect 73 0 37 0;
 #X connect 76 0 16 0;
 #X connect 78 0 34 0;
+#X connect 79 0 78 1;

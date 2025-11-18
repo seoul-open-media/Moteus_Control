@@ -18,8 +18,11 @@ static const byte MCP2517_CS  = 10;  // CS input of MCP2517
 #define SCREEN_ADDRESS 0x3C  // I2C address (0x3C or 0x3D)
 
 //——————————————————————————————————————————————————————————————————————————————
-//  Motor Configuration
+//  Robot & Motor Configuration
 //——————————————————————————————————————————————————————————————————————————————
+// IMPORTANT: Set unique ROBOT_ID for each unit (1-100)
+static const uint8_t ROBOT_ID = 1;  // Change this for each robot!
+
 static const double MOTOR1_DIRECTION = 1.0;   // 1.0 = normal, -1.0 = reversed
 static const double MOTOR2_DIRECTION = 1.0;   // 1.0 = normal, -1.0 = reversed
 
