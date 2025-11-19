@@ -124,12 +124,13 @@ double signedpow(double base, double exponent) {
 }
 
 void loop() {
-  // Query motors for current status (needed for display update)
+  // Note: Motor queries are handled by updateXBeeControl() when engaged (100Hz)
+  // When disengaged, we need to query here for display updates
   static unsigned long lastQueryTime = 0;
   unsigned long currentTime = millis();
   
-  // Query motors at 20Hz (every 50ms) to keep display updated
-  if (currentTime - lastQueryTime >= 50) {
+  // Query motors at 20Hz (every 50ms) when XBee control is NOT active
+  if (!xbeeControlActive && (currentTime - lastQueryTime >= 50)) {
     Moteus::Query::Format query_fmt;
     query_fmt.mode = Moteus::kInt8;
     query_fmt.position = Moteus::kFloat;

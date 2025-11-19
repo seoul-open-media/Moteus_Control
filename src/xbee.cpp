@@ -19,6 +19,12 @@ float xbeeTargetM2 = 0.0;
 bool m1_settled = false;
 bool m2_settled = false;
 
+// Cache motor values for display (updated each control loop)
+float cachedM1Pos = 0.0;
+float cachedM2Pos = 0.0;
+float cachedM1Temp = 0.0;
+float cachedM2Temp = 0.0;
+
 // Position constraints: -90 to +90 degrees = -0.25 to +0.25 revolutions
 const float MIN_POSITION = -0.25;
 const float MAX_POSITION = 0.25;
@@ -75,7 +81,7 @@ void updateXBee() {
         xbeeControlActive = false;
         m1_settled = false;
         m2_settled = false;
-        displayDebug("STOP!");
+        // Don't show debug message - status is shown in main display as DISENGAGED
         continue;  // Don't process robot data
       }
       
@@ -431,16 +437,45 @@ void updateXBeeControl() {
   
   // Query current positions and velocities
   Moteus::Query::Format query_fmt;
+  query_fmt.mode = Moteus::kInt8;
+  query_fmt.position = Moteus::kFloat;
   query_fmt.abs_position = Moteus::kFloat;
   query_fmt.velocity = Moteus::kFloat;
+  query_fmt.motor_temperature = Moteus::kFloat;
   moteus1.SetQuery(&query_fmt);
   moteus2.SetQuery(&query_fmt);
-  delay(5);
+  
+  // Poll CAN bus for responses (more efficient than delay - allows other processing)
+  unsigned long pollStart = micros();
+  while (micros() - pollStart < 5000) {  // Max 5ms timeout
+    // Process any pending CAN messages
+    if (!isnan(moteus1.last_result().values.abs_position) && 
+        !isnan(moteus2.last_result().values.abs_position)) {
+      break;  // Got both responses
+    }
+  }
   
   float currentM1 = moteus1.last_result().values.abs_position;
   float currentM2 = moteus2.last_result().values.abs_position;
   float velM1 = moteus1.last_result().values.velocity;
   float velM2 = moteus2.last_result().values.velocity;
+  
+  // Cache values for display
+  cachedM1Pos = currentM1;
+  cachedM2Pos = currentM2;
+  cachedM1Temp = moteus1.last_result().values.motor_temperature;
+  cachedM2Temp = moteus2.last_result().values.motor_temperature;
+  
+  if (shouldDebug) {
+    Serial.print(F("[Query] M1 pos="));
+    Serial.print(currentM1, 3);
+    Serial.print(F(" temp="));
+    Serial.print(moteus1.last_result().values.motor_temperature, 1);
+    Serial.print(F(" M2 pos="));
+    Serial.print(currentM2, 3);
+    Serial.print(F(" temp="));
+    Serial.println(moteus2.last_result().values.motor_temperature, 1);
+  }
   
   // Calculate errors
   float error1 = xbeeTargetM1 - currentM1;

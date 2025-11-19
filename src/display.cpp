@@ -7,6 +7,17 @@
 extern Moteus moteus1;
 extern Moteus moteus2;
 
+// XBee control state from xbee.cpp
+extern bool xbeeControlActive;
+extern float xbeeTargetM1;
+extern float xbeeTargetM2;
+
+// Cached motor values (updated in updateXBeeControl)
+extern float cachedM1Pos;
+extern float cachedM2Pos;
+extern float cachedM1Temp;
+extern float cachedM2Temp;
+
 // Create display object using Wire1
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire1, OLED_RESET);
 
@@ -63,6 +74,13 @@ void updateDisplay() {
   }
   lastUpdateTime = currentTime;
   
+  // Debug: print occasionally to confirm display is updating
+  static unsigned long lastDisplayDebug = 0;
+  if (currentTime - lastDisplayDebug > 2000) {
+    Serial.println(F("[Display] Updating..."));
+    lastDisplayDebug = currentTime;
+  }
+  
   // Auto-return to normal display after 3 seconds of debug display
   if (showDebugScreen && (currentTime - lastDebugTime > 3000)) {
     showDebugScreen = false;
@@ -84,7 +102,7 @@ void updateDisplay() {
       int idx = (debugMessageIndex + i) % MAX_DEBUG_MESSAGES;
       if (debugMessages[idx].length() > 0) {
         display.setCursor(0, yPos);
-        display.println(debugMessages[idx]);
+        display.print(debugMessages[idx]);
         yPos += 9;
       }
     }
@@ -92,45 +110,112 @@ void updateDisplay() {
     return;
   }
   
-  // Normal display - Query motors directly from inside this function
-  const auto& motor1 = moteus1.last_result().values;
-  const auto& motor2 = moteus2.last_result().values;
+  // Get motor values - use cached values when engaged, live values when disengaged
+  float m1_pos, m2_pos, m1_temp, m2_temp;
   
-  // Title
-  display.setCursor(0, 0);
-  display.println(F("MOTEUS CONTROL"));
+  if (xbeeControlActive) {
+    // Use cached values from updateXBeeControl (avoids NaN from immediate query read)
+    m1_pos = cachedM1Pos;
+    m2_pos = cachedM2Pos;
+    m1_temp = cachedM1Temp;
+    m2_temp = cachedM2Temp;
+  } else {
+    // Read directly when disengaged
+    const auto& motor1 = moteus1.last_result().values;
+    const auto& motor2 = moteus2.last_result().values;
+    m1_pos = motor1.abs_position;
+    m2_pos = motor2.abs_position;
+    m1_temp = motor1.motor_temperature;
+    m2_temp = motor2.motor_temperature;
+  }
+  
+  // Debug: print motor values to serial
+  static unsigned long lastMotorDebug = 0;
+  if (currentTime - lastMotorDebug > 2000) {
+    Serial.print(F("[Display] M1="));
+    Serial.print(m1_pos, 2);
+    Serial.print(F(" "));
+    Serial.print(m1_temp, 0);
+    Serial.print(F("C M2="));
+    Serial.print(m2_pos, 2);
+    Serial.print(F(" "));
+    Serial.print(m2_temp, 0);
+    Serial.print(F("C State="));
+    Serial.println(xbeeControlActive ? "ENGAGED" : "DISENGAGED");
+    lastMotorDebug = currentTime;
+  }
+  
+  // Header: Motor1 and Motor2
+  display.setCursor(30, 0);
+  display.print(F("Motor1"));
+  display.setCursor(85, 0);
+  display.print(F("Motor2"));
+  
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
   
-  // Motor 1 info
+  // Row 1: Position
   display.setCursor(0, 12);
-  display.print(F("M1:"));
-  display.setCursor(20, 12);
-  display.print(motor1.abs_position, 3);
-  display.print(F("r"));
-  display.setCursor(75, 12);
-  display.print(motor1.motor_temperature, 1);
+  display.print(F("pos."));
+  display.setCursor(35, 12);
+  display.print(F("      "));  // Clear
+  display.setCursor(35, 12);
+  display.print(m1_pos, 2);
+  display.setCursor(90, 12);
+  display.print(F("      "));  // Clear
+  display.setCursor(90, 12);
+  display.print(m2_pos, 2);
+  
+  // Row 2: Target (only show if engaged)
+  display.setCursor(0, 22);
+  display.print(F("targ."));
+  if (xbeeControlActive) {
+    display.setCursor(35, 22);
+    display.print(F("      "));  // Clear
+    display.setCursor(35, 22);
+    display.print(xbeeTargetM1, 2);
+    display.setCursor(90, 22);
+    display.print(F("      "));  // Clear
+    display.setCursor(90, 22);
+    display.print(xbeeTargetM2, 2);
+  } else {
+    display.setCursor(35, 22);
+    display.print(F("  --  "));
+    display.setCursor(90, 22);
+    display.print(F("  --  "));
+  }
+  
+  // Row 3: Temperature
+  display.setCursor(0, 32);
+  display.print(F("temp."));
+  display.setCursor(35, 32);
+  display.print(F("    "));  // Clear
+  display.setCursor(35, 32);
+  display.print(m1_temp, 0);
+  display.print(F("C"));
+  display.setCursor(90, 32);
+  display.print(F("    "));  // Clear
+  display.setCursor(90, 32);
+  display.print(m2_temp, 0);
   display.print(F("C"));
   
-  // Motor 2 info
-  display.setCursor(0, 25);
-  display.print(F("M2:"));
-  display.setCursor(20, 25);
-  display.print(motor2.abs_position, 3);
-  display.print(F("r"));
-  display.setCursor(75, 25);
-  display.print(motor2.motor_temperature, 1);
-  display.print(F("C"));
+  // Status line at bottom
+  display.setCursor(0, 50);
+  if (xbeeControlActive) {
+    display.print(F("ENGAGED"));
+  } else {
+    display.print(F("DISENGAGED"));
+  }
   
-  // Temperature warning indicators
-  if (motor1.motor_temperature > 50.0 || motor2.motor_temperature > 50.0) {
-    display.setCursor(90, 0);
-    display.print(F("WARM!"));
+  // Temperature warning
+  if (m1_temp > 50.0 || m2_temp > 50.0) {
+    display.setCursor(80, 50);
+    display.print(F("WARM"));
   }
   
   // Critical temperature warning with inverted display
   static bool wasInverted = false;
   static unsigned long lastTempPrint = 0;
-  bool shouldInvert = (motor1.motor_temperature > 60.0 || motor2.motor_temperature > 60.0);
+  bool shouldInvert = (m1_temp > 60.0 || m2_temp > 60.0);
   
   if (shouldInvert) {
     display.setCursor(85, 0);
@@ -144,9 +229,9 @@ void updateDisplay() {
       Serial.print(F("Time: "));
       Serial.print(now);
       Serial.print(F(" ms | M1 temp: "));
-      Serial.print(motor1.motor_temperature, 1);
+      Serial.print(m1_temp, 1);
       Serial.print(F("°C | M2 temp: "));
-      Serial.print(motor2.motor_temperature, 1);
+      Serial.print(m2_temp, 1);
       Serial.println(F("°C"));
       lastTempPrint = now;
     }
