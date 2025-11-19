@@ -1,4 +1,4 @@
-#N canvas 1039 1130 1717 899 12;
+#N canvas 1057 1130 1717 899 12;
 #X text 24 204 Ahae;
 #X text 35 227 1;
 #X text 36 270 2;
@@ -402,7 +402,7 @@
 #N canvas 72 96 1848 984 DMX_data_serial 0;
 #X obj 76 572 list append 254;
 #X obj 76 673 prepend set;
-#X msg 84 691 255 1 2 255 0 98 122 0 0 0 0 0 0 0 0 0 0 18 22 0 0 64 86 0 254;
+#X msg 84 691 255 1 2 255 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 254;
 #X obj 91 598 print;
 #X obj 112 627 s light_dmx;
 #X obj 1632 738 tgl 15 0 empty empty empty 17 7 0 10 #fcfcfc #000000 #000000 0 1;
@@ -807,7 +807,7 @@
 #X connect 99 0 98 0;
 #X coords 0 720 1 719 85 60 0;
 #X restore 1533 88 pd Mixer_New;
-#N canvas 282 411 1386 944 Scene 1;
+#N canvas 282 134 1386 944 Scene 1;
 #X text 350 61 in case of sequential play set time 0 and connect right outlet to the next player's inlet;
 #X text 351 24 repetition = 0 continue the loop until other player plays;
 #X text 354 38 Set time 0 for the sequential play;

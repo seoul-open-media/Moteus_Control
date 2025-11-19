@@ -123,8 +123,10 @@ void updateXBee() {
         Serial.print(digit3);
         Serial.println();
 
-        // Map velocity: digit1 0-9 maps to 50-500 rev/s (reasonable range)
-        float velocity = 50.0 + (digit1 / 9.0) * 450.0;
+        // Map velocity: digit1 0-9 with custom mapping (higher values to prevent stalling)
+        // 0→0, 1→20, 2→30, 3→40, 4→50, 5→60, 6→70, 7→80, 8→90, 9→100
+        const float vel_map[10] = {0, 20, 30, 40, 50, 60, 70, 80, 90, 100};
+        float velocity = (digit1 <= 9) ? vel_map[digit1] : 100.0;
         
         // Map position: 0=stay, 1-4=negative range, 5=center, 6-9=positive range
         float pos1, pos2;
@@ -188,8 +190,10 @@ void updateXBee() {
         uint8_t digit3 = (value / 10) % 10;   // motor 2 position
         // uint8_t digit4 = value % 10;          // reserved
 
-        // Map velocity: digit1 0-9 maps to 50-500 rev/s (reasonable range)
-        float velocity = 50.0 + (digit1 / 9.0) * 450.0;
+        // Map velocity: digit1 0-9 with custom mapping (higher values to prevent stalling)
+        // 0→0, 1→20, 2→30, 3→40, 4→50, 5→60, 6→70, 7→80, 8→90, 9→100
+        const float vel_map[10] = {0, 20, 30, 40, 50, 60, 70, 80, 90, 100};
+        float velocity = (digit1 <= 9) ? vel_map[digit1] : 100.0;
         
         // Map position: 0=stay, 1-4=negative range, 5=center, 6-9=positive range
         float pos1, pos2;
