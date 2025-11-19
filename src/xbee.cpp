@@ -2,6 +2,7 @@
 #include "motor_control.h"
 #include "display.h"
 #include "config.h"
+#include "solenoid.h"
 #include <Moteus.h>
 
 // External declarations from main.cpp
@@ -123,7 +124,7 @@ void updateXBee() {
         uint8_t digit1 = (value / 1000) % 10; // velocity
         uint8_t digit2 = (value / 100) % 10;  // motor 1 position
         uint8_t digit3 = (value / 10) % 10;   // motor 2 position
-        // uint8_t digit4 = value % 10;          // reserved
+        uint8_t digit4 = value % 10;          // electromagnet/solenoid control
 
         Serial.print(F("Parsed for Robot "));
         Serial.print(ROBOT_ID);
@@ -135,6 +136,8 @@ void updateXBee() {
         Serial.print(digit2);
         Serial.print(F(" m2="));
         Serial.print(digit3);
+        Serial.print(F(" d4="));
+        Serial.print(digit4);
         Serial.println();
 
         // Map velocity: digit1 0-9 with custom mapping (higher values to prevent stalling)
@@ -194,6 +197,27 @@ void updateXBee() {
         Serial.print(pos2, 3);
         Serial.print(F(" vel="));
         Serial.println(velocity, 1);
+        
+        // Handle digit4: electromagnet/solenoid control based on ROBOT_TYPE
+        if (ROBOT_TYPE == 'A') {
+          // Type A behavior
+          if (digit4 == 1) {
+            triggerTypeA_1();  // EM1, EM2, EM3
+          } else if (digit4 == 2) {
+            triggerTypeA_2();  // Solenoid
+          } else if (digit4 == 3) {
+            triggerTypeA_3();  // All
+          }
+        } else if (ROBOT_TYPE == 'B') {
+          // Type B behavior
+          if (digit4 == 1) {
+            triggerTypeB_1();  // EM1, EM2
+          } else if (digit4 == 2) {
+            triggerTypeB_2();  // Solenoid, EM3
+          } else if (digit4 == 3) {
+            triggerTypeB_3();  // All
+          }
+        }
       } else if (broadcast) {
         // Example: broadcast command, all robots use the same value
         uint8_t msb = robot_data[0];

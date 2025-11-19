@@ -12,6 +12,7 @@
 #include "display.h"
 #include "neokey.h"
 #include "xbee.h"
+#include "solenoid.h"
 
 //——————————————————————————————————————————————————————————————————————————————
 //  ACAN2517FD Driver object
@@ -58,6 +59,9 @@ void setup() {
   
   // Initialize XBee on Serial4
   initXBee();
+  
+  // Initialize electromagnets and solenoid
+  initSolenoid();
 
   SPI.begin();
 
@@ -157,6 +161,9 @@ void loop() {
   
   // Update XBee continuous control
   updateXBeeControl();
+  
+  // Update electromagnet/solenoid timing
+  updateSolenoid();
 
   // Check if there's a pending command from interrupt
   String val = "";
