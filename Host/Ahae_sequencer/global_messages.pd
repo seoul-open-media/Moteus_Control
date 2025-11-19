@@ -1,7 +1,6 @@
-#N canvas 304 896 1666 757 12;
-#X obj 151 131 bng 50 250 50 0 empty Stop_All_Ahae STOP\\\ ALL\\\ AHAE
--25 -15 0 15 #ff0400 #000000 #000000;
-#N canvas 862 421 931 377 global_message 1;
+#N canvas 304 321 1666 757 12;
+#X obj 151 131 bng 50 250 50 0 empty Stop_All_Ahae STOP\ ALL\ AHAE -25 -15 0 15 #ff0400 #000000 #000000;
+#N canvas 862 421 931 377 global_message 0;
 #X obj 53 134 inlet;
 #X obj 174 131 inlet;
 #X obj 174 213 s CRMuxXbee;
@@ -12,37 +11,32 @@
 #X obj 382 130 inlet;
 #X obj 382 212 s SetBaseYawM025;
 #X msg 382 182 50004;
-#X msg 51 184 50000;
 #X obj 505 128 inlet;
 #X obj 505 210 s DefaultPosition;
 #X msg 505 180 1111;
 #X obj 663 209 s command50001;
 #X msg 665 179 50001;
 #X obj 665 133 inlet;
-#X obj 50 214 s stop_Ahae;
-#X connect 0 0 10 0;
+#X floatatom 51 289 5 0 0 2 Global_Command - Global_Command 0;
+#X msg 51 236 1;
+#X connect 0 0 17 0;
 #X connect 1 0 3 0;
 #X connect 3 0 2 0;
 #X connect 4 0 6 0;
 #X connect 6 0 5 0;
 #X connect 7 0 9 0;
 #X connect 9 0 8 0;
-#X connect 10 0 17 0;
-#X connect 11 0 13 0;
-#X connect 13 0 12 0;
+#X connect 10 0 12 0;
+#X connect 12 0 11 0;
+#X connect 14 0 13 0;
 #X connect 15 0 14 0;
-#X connect 16 0 15 0;
+#X connect 17 0 16 0;
 #X restore -7 597 pd global_message;
-#X obj 151 200 bng 25 250 50 0 empty empty CRMuxXbee 0 -5 0 10 #ff8300
-#000000 #000000;
-#X obj 151 244 bng 25 250 50 0 empty empty SetBaseYawZero 0 -5 0 10
-#faff00 #000000 #000000;
-#X obj 151 288 bng 25 250 50 0 empty empty SetBaseYawM025 0 -5 0 10
-#feffc6 #000000 #000000;
-#X obj 151 332 bng 25 250 50 0 empty empty Default\\\ Position 0 -5
-0 10 #9c00ff #000000 #000000;
-#X obj 151 376 bng 25 250 50 0 empty empty 5001 0 -5 0 10 #fcfcfc #000000
-#000000;
+#X obj 151 200 bng 25 250 50 0 empty empty CRMuxXbee 0 -5 0 10 #ff8300 #000000 #000000;
+#X obj 151 244 bng 25 250 50 0 empty empty SetBaseYawZero 0 -5 0 10 #faff00 #000000 #000000;
+#X obj 151 288 bng 25 250 50 0 empty empty SetBaseYawM025 0 -5 0 10 #feffc6 #000000 #000000;
+#X obj 151 332 bng 25 250 50 0 empty empty Default\ Position 0 -5 0 10 #9c00ff #000000 #000000;
+#X obj 151 376 bng 25 250 50 0 empty empty 5001 0 -5 0 10 #fcfcfc #000000 #000000;
 #N canvas 501 146 904 923 activity_check_routine 0;
 #X text 266 125 ms. 10000ms. = 1sec;
 #X obj 198 216 float;
@@ -50,16 +44,14 @@
 #X obj 264 215 + 1;
 #X floatatom 198 263 5 0 0 0 - - - 0;
 #X floatatom 201 353 5 0 0 0 - - - 0;
-#X obj 327 181 bng 19 250 50 0 activity_ckeck_bang empty activity_ckeck_bang
-0 -10 0 12 #fcfcfc #000000 #000000;
+#X obj 327 181 bng 19 250 50 0 activity_ckeck_bang empty activity_ckeck_bang 0 -10 0 12 #fcfcfc #000000 #000000;
 #X msg 230 156 0;
 #X obj 182 127 metro 500;
 #X obj 198 300 % 2;
 #X obj 199 327 + 1;
 #X obj 125 411 pack f f;
 #X msg 176 71 1;
-#X obj 180 16 bng 15 250 50 0 empty empty empty 17 7 0 10 #fcfcfc #000000
-#000000;
+#X obj 180 16 bng 15 250 50 0 empty empty empty 17 7 0 10 #fcfcfc #000000 #000000;
 #X obj 94 128 metro 1000;
 #X obj 54 246 float;
 #X floatatom 85 218 5 0 0 0 - - - 0;
@@ -171,10 +163,8 @@
 #X connect 48 0 25 0;
 #X connect 48 0 49 0;
 #X restore 122 462 pd activity_check_routine;
-#X obj 152 419 bng 25 250 50 0 empty empty activity_check_routine -5
--5 0 10 #bbbbbb #000000 #000000;
-#X obj 184 427 bng 15 250 50 0 empty empty stop 17 7 0 10 #bbbbbb #000000
-#000000;
+#X obj 152 419 bng 25 250 50 0 empty empty activity_check_routine -5 -5 0 10 #bbbbbb #000000 #000000;
+#X obj 184 427 bng 15 250 50 0 empty empty stop 17 7 0 10 #bbbbbb #000000 #000000;
 #X connect 0 0 1 0;
 #X connect 2 0 1 1;
 #X connect 3 0 1 2;

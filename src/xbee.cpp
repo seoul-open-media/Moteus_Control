@@ -59,13 +59,27 @@ void updateXBee() {
         continue;  // Keep searching
       }
       
-      // Look for second header byte
-      uint8_t byte2 = Serial4.read();
-      if (byte2 != 0xFF) {
-        continue;  // Keep searching
+      // Second byte is global control byte
+      uint8_t controlByte = Serial4.read();
+      
+      Serial.print(F("[XBee] Header found! Control byte: "));
+      Serial.println(controlByte);
+      
+      // Handle global control commands
+      if (controlByte == 1) {
+        // Stop
+        Serial.println(F("[XBee] STOP!"));
+        moteus1.SetStop();
+        moteus2.SetStop();
+        xbeeControlActive = false;
+        m1_settled = false;
+        m2_settled = false;
+        displayDebug("STOP!");
+        continue;  // Don't process robot data
       }
       
-      Serial.println(F("[XBee] Valid header found!"));
+      // Any other control byte (0, 0xFF, etc.): Normal operation, continue processing
+      Serial.println(F("[XBee] Normal operation mode"));
       
       // Now wait for the remaining 26 bytes
       unsigned long startWait = millis();
