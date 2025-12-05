@@ -75,7 +75,7 @@ void updateXBee() {
       // Handle global control commands
       if (controlByte == 1) {
         // Stop
-        Serial.println(F("[XBee] STOP!"));
+        Serial.println(F("[XBee] STOP! Control byte = 1, disabling XBee control"));
         moteus1.SetStop();
         moteus2.SetStop();
         xbeeControlActive = false;
@@ -86,7 +86,8 @@ void updateXBee() {
       }
       
       // Any other control byte (0, 0xFF, etc.): Normal operation, continue processing
-      Serial.println(F("[XBee] Normal operation mode"));
+      Serial.print(F("[XBee] Normal operation mode, control byte = "));
+      Serial.println(controlByte);
       
       // Now wait for the remaining 26 bytes
       unsigned long startWait = millis();
@@ -146,9 +147,11 @@ void updateXBee() {
         Serial.print(digit4);
         Serial.println();
 
-        // Map velocity: digit1 0-9 with custom mapping (higher values to prevent stalling)
-        // 0→0, 1→20, 2→30, 3→40, 4→50, 5→60, 6→70, 7→80, 8→90, 9→100
-        const float vel_map[10] = {0, 20, 30, 40, 50, 60, 70, 80, 90, 100};
+        // Map velocity: digit1 0-9 with custom mapping (lower values for finer control)
+        // 0→0, 1→10, 2→20, 3→30, 4→40, 5→50, 6→60, 7→70, 8→80, 9→100
+        // const float vel_map[10] = {0, 10, 20, 30, 40, 50, 60, 70, 80, 100};
+        // Workshop mapping: 0→0, 1→10, 2→20, 3→60, 4→80, 5-9→100
+        const float vel_map[10] = {0, 10, 20, 60, 80, 100, 100, 100, 100, 100};
         float velocity = (digit1 <= 9) ? vel_map[digit1] : 100.0;
         
         // Map position: 0=stay, 1-4=negative range, 5=center, 6-9=positive range
@@ -234,9 +237,11 @@ void updateXBee() {
         uint8_t digit3 = (value / 10) % 10;   // motor 2 position
         // uint8_t digit4 = value % 10;          // reserved
 
-        // Map velocity: digit1 0-9 with custom mapping (higher values to prevent stalling)
-        // 0→0, 1→20, 2→30, 3→40, 4→50, 5→60, 6→70, 7→80, 8→90, 9→100
-        const float vel_map[10] = {0, 20, 30, 40, 50, 60, 70, 80, 90, 100};
+        // Map velocity: digit1 0-9 with custom mapping (lower values for finer control)
+        // 0→0, 1→10, 2→20, 3→30, 4→40, 5→50, 6→60, 7→70, 8→80, 9→100
+        // const float vel_map[10] = {0, 10, 20, 30, 40, 50, 60, 70, 80, 100};
+        // Workshop mapping: 0→0, 1→10, 2→20, 3→60, 4→80, 5-9→100
+        const float vel_map[10] = {0, 10, 20, 60, 80, 100, 100, 100, 100, 100};
         float velocity = (digit1 <= 9) ? vel_map[digit1] : 100.0;
         
         // Map position: 0=stay, 1-4=negative range, 5=center, 6-9=positive range
@@ -430,8 +435,18 @@ void updateXBeeControl() {
   
   static unsigned long lastUpdate = 0;
   static unsigned long lastDebug = 0;
+  static unsigned long lastActiveDebug = 0;
   if (millis() - lastUpdate < 10) return;  // 100Hz update rate
   lastUpdate = millis();
+  
+  // Debug: confirm control is active
+  if (millis() - lastActiveDebug > 2000) {
+    Serial.print(F("[XBee Control] Active, targets: M1="));
+    Serial.print(xbeeTargetM1, 4);
+    Serial.print(F(" M2="));
+    Serial.println(xbeeTargetM2, 4);
+    lastActiveDebug = millis();
+  }
   
   bool shouldDebug = (millis() - lastDebug > 1000);
   
@@ -494,12 +509,14 @@ void updateXBeeControl() {
     Serial.println(error2, 3);
   }
   
-  const float deadband = 0.01;  // Small deadband for responsive tracking (~3.6 degrees)
-  const float brake_zone = 0.03;  // Small brake zone - switch to gentle control sooner
+  const float brake_zone = 0.01;  // Very small brake zone - maintain speed until very close
   
   // Use per-motor velocity limits
   float max_vel_m1 = xbeeMaxVelM1;
   float max_vel_m2 = xbeeMaxVelM2;
+  
+  // Speed-dependent deadband - smaller at slow speeds for accuracy
+  float deadband = (max_vel_m1 < 30.0 || max_vel_m2 < 30.0) ? 0.003 : 0.01;
   
   if (shouldDebug) {
     Serial.print(F("[Vel] max_vel_m1="));
@@ -546,15 +563,14 @@ void updateXBeeControl() {
   }
   
   // Calculate velocities for active motors
+  // Motor 1 is not physically used - just keep it settled to avoid errors
   if (m1_active) {
-    if (abs(error1) > brake_zone) {
-      // Far from target - fast approach
-      vel1 = error1 * Kp_far_m1 - velM1 * Kd_m1;
-    } else {
-      // Close to target - gentle approach
-      vel1 = error1 * Kp_near_m1 - velM1 * (Kd_m1 * 1.5);
+    // Motor 1 not used in workshop setup, always set to settled
+    vel1 = 0.0;
+    if (!m1_settled) {
+      m1_settled = true;
+      Serial.println(F("M1 auto-settled (not used)"));
     }
-    vel1 = constrain(vel1, -max_vel_m1, max_vel_m1);
   }
   
   // Motor 2 control
@@ -562,9 +578,15 @@ void updateXBeeControl() {
     if (abs(error2) > brake_zone) {
       vel2 = error2 * Kp_far_m2 - velM2 * Kd_m2;
     } else {
-      vel2 = error2 * Kp_near_m2 - velM2 * (Kd_m2 * 1.5);
+      // Close to target - minimal damping to maintain speed
+      vel2 = error2 * Kp_near_m2 - velM2 * (Kd_m2 * 0.3);
     }
     vel2 = constrain(vel2, -max_vel_m2, max_vel_m2);
+    // Apply velocity deadband only at high speeds to eliminate jitter
+    // At slow speeds, allow creeping to reach exact target
+    if (max_vel_m2 >= 30.0 && abs(vel2) < 3.0) {
+      vel2 = 0.0;
+    }
   }
   
   if (shouldDebug) {
@@ -582,18 +604,19 @@ void updateXBeeControl() {
   
   // Always send commands to keep motors engaged
   // When settled, just send velocity=0 to hold in place
-  // Use HIGH CONSTANT acceleration so motors reach target velocity quickly
   Moteus::PositionMode::Command cmd1;
   cmd1.position = NaN;
   cmd1.velocity = m1_settled ? 0.0 : vel1;
   cmd1.velocity_limit = max_vel_m1;
-  cmd1.accel_limit = 800.0;  // High constant acceleration - same for all velocities
+  cmd1.accel_limit = 800.0;
+  cmd1.maximum_torque = 1.2;  // Modest increase for better low-speed torque
   
   Moteus::PositionMode::Command cmd2;
   cmd2.position = NaN;
   cmd2.velocity = m2_settled ? 0.0 : vel2;
   cmd2.velocity_limit = max_vel_m2;
-  cmd2.accel_limit = 800.0;  // High constant acceleration - same for all velocities
+  cmd2.accel_limit = 800.0;
+  cmd2.maximum_torque = 1.2;  // Modest increase for better low-speed torque
   
   moteus1.SetPosition(cmd1, &position_fmt);
   moteus2.SetPosition(cmd2, &position_fmt);

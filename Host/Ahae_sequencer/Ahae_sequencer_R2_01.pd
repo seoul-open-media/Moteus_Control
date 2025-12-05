@@ -1,4 +1,4 @@
-#N canvas 1022 1096 1658 865 12;
+#N canvas 1122 1070 1658 866 12;
 #X text 24 204 Ahae;
 #X text 35 227 1;
 #X text 36 270 2;
@@ -807,7 +807,7 @@
 #X connect 99 0 98 0;
 #X coords 0 720 1 719 85 60 0;
 #X restore 1533 88 pd Mixer_New;
-#N canvas 282 134 1386 944 Scene 0;
+#N canvas 156 130 1386 944 Scene 0;
 #X text 350 61 in case of sequential play set time 0 and connect right outlet to the next player's inlet;
 #X text 351 24 repetition = 0 continue the loop until other player plays;
 #X text 354 38 Set time 0 for the sequential play;

@@ -129,16 +129,22 @@ void updateDisplay() {
     m2_temp = motor2.motor_temperature;
   }
   
+  // Wrap position to -0.25 to +0.25 range and convert to degrees
+  m1_pos = fmod(m1_pos + 0.25, 0.5) - 0.25;
+  m2_pos = fmod(m2_pos + 0.25, 0.5) - 0.25;
+  float m1_deg = m1_pos * 360.0;  // Convert revolutions to degrees
+  float m2_deg = m2_pos * 360.0;
+  
   // Debug: print motor values to serial
   static unsigned long lastMotorDebug = 0;
   if (currentTime - lastMotorDebug > 2000) {
     Serial.print(F("[Display] M1="));
-    Serial.print(m1_pos, 2);
-    Serial.print(F(" "));
+    Serial.print(m1_deg, 0);
+    Serial.print(F("deg "));
     Serial.print(m1_temp, 0);
     Serial.print(F("C M2="));
-    Serial.print(m2_pos, 2);
-    Serial.print(F(" "));
+    Serial.print(m2_deg, 0);
+    Serial.print(F("deg "));
     Serial.print(m2_temp, 0);
     Serial.print(F("C State="));
     Serial.println(xbeeControlActive ? "ENGAGED" : "DISENGAGED");
@@ -153,30 +159,48 @@ void updateDisplay() {
   
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
   
-  // Row 1: Position
+  // Row 1: Position in degrees
   display.setCursor(0, 12);
   display.print(F("pos."));
   display.setCursor(35, 12);
   display.print(F("      "));  // Clear
   display.setCursor(35, 12);
-  display.print(m1_pos, 2);
+  display.print(m1_deg, 0);
   display.setCursor(90, 12);
   display.print(F("      "));  // Clear
   display.setCursor(90, 12);
-  display.print(m2_pos, 2);
+  display.print(m2_deg, 0);
   
-  // Row 2: Target (only show if engaged)
+  // Row 2: Target in degrees (only show if engaged)
   display.setCursor(0, 22);
   display.print(F("targ."));
   if (xbeeControlActive) {
+    float targ1_deg = xbeeTargetM1 * 360.0;
+    float targ2_deg = xbeeTargetM2 * 360.0;
+    
+    // Debug print targets
+    static unsigned long lastTargDebug = 0;
+    if (currentTime - lastTargDebug > 2000) {
+      Serial.print(F("[Display] Targets: M1="));
+      Serial.print(xbeeTargetM1, 4);
+      Serial.print(F(" ("));
+      Serial.print(targ1_deg, 0);
+      Serial.print(F("deg) M2="));
+      Serial.print(xbeeTargetM2, 4);
+      Serial.print(F(" ("));
+      Serial.print(targ2_deg, 0);
+      Serial.println(F("deg)"));
+      lastTargDebug = currentTime;
+    }
+    
     display.setCursor(35, 22);
     display.print(F("      "));  // Clear
     display.setCursor(35, 22);
-    display.print(xbeeTargetM1, 2);
+    display.print(targ1_deg, 0);
     display.setCursor(90, 22);
     display.print(F("      "));  // Clear
     display.setCursor(90, 22);
-    display.print(xbeeTargetM2, 2);
+    display.print(targ2_deg, 0);
   } else {
     display.setCursor(35, 22);
     display.print(F("  --  "));

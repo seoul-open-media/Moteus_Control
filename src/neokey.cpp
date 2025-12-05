@@ -1,7 +1,17 @@
 #include "neokey.h"
 #include "motor_control.h"
 #include "display.h"
+#include "xbee.h"
 #include <Arduino.h>
+
+// External declarations from xbee.cpp
+extern bool xbeeControlActive;
+extern float xbeeTargetM1;
+extern float xbeeTargetM2;
+extern float xbeeMaxVelM1;
+extern float xbeeMaxVelM2;
+extern bool m1_settled;
+extern bool m2_settled;
 
 // Create NeoKey object on Wire (I2C bus 0)
 Adafruit_NeoKey_1x4 neokey;
@@ -74,17 +84,35 @@ void updateNeoKey() {
   }
   
   if (pressed) {
-    // Key 0: Both motors to position 0
+    // Key 1 (index 0): Default position (0) with speed 1 (10 rev/s)
     if (pressed & (1 << KEY_POS_0)) {
-      Serial.println(F("NeoKey: Motors -> 0.0"));
-      displayDebug("K: Pos 0.0");
+      Serial.println(F("NeoKey1: Default position (0) with speed 1"));
+      displayDebug("K1: Pos 0");
       setKeyColor(KEY_POS_0, COLOR_GREEN);
-      moveToEncoderPosition(0.0, 0.0);
+      
+      // Set XBee control to position 0 with speed 1 (10 rev/s)
+      xbeeTargetM1 = 0.0;
+      xbeeTargetM2 = 0.0;
+      xbeeMaxVelM1 = 10.0;  // Speed 1 = 10 rev/s
+      xbeeMaxVelM2 = 10.0;
+      m1_settled = false;
+      m2_settled = false;
+      xbeeControlActive = true;
+      
+      Serial.print(F("[NeoKey1] Set targets: M1="));
+      Serial.print(xbeeTargetM1, 4);
+      Serial.print(F(" M2="));
+      Serial.print(xbeeTargetM2, 4);
+      Serial.print(F(" vel="));
+      Serial.print(xbeeMaxVelM1, 1);
+      Serial.print(F(" active="));
+      Serial.println(xbeeControlActive ? "YES" : "NO");
+      
       setKeyColor(KEY_POS_0, COLOR_DIM_GREEN);
       return;  // Exit after processing
     }
     
-    // Key 1: Both motors to position 0.25
+    // Key 2 (index 1): Both motors to position 0.25
     if (pressed & (1 << KEY_POS_025)) {
       Serial.println(F("NeoKey: Motors -> 0.25"));
       displayDebug("K: Pos 0.25");
@@ -94,7 +122,7 @@ void updateNeoKey() {
       return;  // Exit after processing
     }
     
-    // Key 2: Both motors to position 0.75
+    // Key 3 (index 2): Both motors to position 0.75
     if (pressed & (1 << KEY_POS_075)) {
       Serial.println(F("NeoKey: Motors -> 0.75"));
       displayDebug("K: Pos 0.75");
@@ -104,11 +132,16 @@ void updateNeoKey() {
       return;  // Exit after processing
     }
     
-    // Key 3: STOP - Stop motors immediately
+    // Key 4 (index 3): EMERGENCY STOP
     if (pressed & (1 << KEY_STOP)) {
-      Serial.println(F("NeoKey: EMERGENCY STOP (Key 3 pressed)"));
-      displayDebug("K: STOP!");
+      Serial.println(F("NeoKey4: EMERGENCY STOP"));
+      displayDebug("K4: STOP!");
       setKeyColor(KEY_STOP, COLOR_RED);
+      
+      // Stop XBee control
+      xbeeControlActive = false;
+      m1_settled = false;
+      m2_settled = false;
       
       // Set interrupt to stop any running command
       interruptCommand = true;
