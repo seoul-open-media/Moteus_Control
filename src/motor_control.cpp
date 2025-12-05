@@ -515,7 +515,7 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
             motor1_done = true;
           }
           position_cmd1.position = NaN;
-          position_cmd1.velocity = 0.0;
+          position_cmd1.velocity = 0.5;  // CRITICAL: Never use 0 - causes disengage!
         } else if (overshot || abs_error1 < BRAKE_ZONE) {
           motor1_stop_count = 0;
           motor1_done = false;
@@ -623,7 +623,7 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
             motor2_done = true;
           }
           position_cmd2.position = NaN;
-          position_cmd2.velocity = 0.0;
+          position_cmd2.velocity = 0.5;  // CRITICAL: Never use 0 - causes disengage!
         } else if (overshot || abs_error2 < BRAKE_ZONE) {
           motor2_stop_count = 0;
           motor2_done = false;

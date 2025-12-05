@@ -21,7 +21,7 @@ static const byte MCP2517_CS  = 10;  // CS input of MCP2517
 //  Robot & Motor Configuration
 //——————————————————————————————————————————————————————————————————————————————
 // IMPORTANT: Set unique ROBOT_ID for each unit (1-100)
-static const uint8_t ROBOT_ID = 4;  // Change this for each robot!
+static const uint8_t ROBOT_ID = 1;  // Change this for each robot!
 
 // Robot Type: 'A' or 'B' (determines electromagnet/solenoid behavior)
 // Type A: digit4=1→EM1+EM2+EM3, digit4=2→SOL, digit4=3→ALL

@@ -144,12 +144,13 @@ void updateNeoKey() {
       m2_settled = false;
       
       // Set interrupt to stop any running command
-      interruptCommand = true;
-      commandRunning = false;
+      // interruptCommand = true;
+      // commandRunning = false;
       
-      // Stop motors immediately
-      moteus1.SetStop();
-      moteus2.SetStop();
+      // DISABLED: Stop motors immediately (Workshop mode - keep motors engaged)
+      Serial.println(F("NeoKey STOP button pressed but IGNORED (Workshop Mode)"));
+      // moteus1.SetStop();
+      // moteus2.SetStop();
       
       // Flash red LED
       delay(100);

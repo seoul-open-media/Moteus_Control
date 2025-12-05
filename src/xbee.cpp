@@ -25,6 +25,13 @@ float cachedM2Pos = 0.0;
 float cachedM1Temp = 0.0;
 float cachedM2Temp = 0.0;
 
+// Fault recovery state
+static bool m2_in_fault = false;
+static unsigned long m2_fault_detected_time = 0;
+static int m2_recovery_attempts = 0;
+const int MAX_RECOVERY_ATTEMPTS = 3;
+const unsigned long RECOVERY_DELAY_MS = 2000;  // Wait 2s before retry
+
 // Position constraints: -90 to +90 degrees = -0.25 to +0.25 revolutions
 const float MIN_POSITION = -0.25;
 const float MAX_POSITION = 0.25;
@@ -74,15 +81,45 @@ void updateXBee() {
       
       // Handle global control commands
       if (controlByte == 1) {
-        // Stop
-        Serial.println(F("[XBee] STOP! Control byte = 1, disabling XBee control"));
-        moteus1.SetStop();
-        moteus2.SetStop();
-        xbeeControlActive = false;
+        // DISABLED: Stop command ignored during workshop performance
+        // Pure Data accidentally sends control byte=1, causing unwanted disengage
+        Serial.println(F(""));
+        Serial.println(F("========================================"));
+        Serial.println(F("[XBee] STOP COMMAND IGNORED (Workshop Mode)"));
+        Serial.println(F("Control byte = 1, but continuing operation"));
+        Serial.println(F("========================================"));
+        // moteus1.SetStop();  // COMMENTED OUT
+        // moteus2.SetStop();  // COMMENTED OUT
+        // xbeeControlActive = false;  // COMMENTED OUT
+        // m1_settled = false;
+        // m2_settled = false;
+        // displayDebug("XBee STOP!");
+        // continue;  // Don't process robot data
+      }
+      
+      // Control byte 0 or others: Check if we should re-engage
+      // If control was previously disabled, re-enable it
+      if (!xbeeControlActive) {
+        Serial.println(F(""));
+        Serial.println(F("========================================"));
+        Serial.println(F("[XBee] RE-ENGAGING XBee control"));
+        Serial.print(F("Control byte = "));
+        Serial.println(controlByte);
+        Serial.println(F("========================================"));
+        xbeeControlActive = true;
         m1_settled = false;
         m2_settled = false;
-        // Don't show debug message - status is shown in main display as DISENGAGED
-        continue;  // Don't process robot data
+        
+        // Immediately re-engage motor at current target position
+        // This prevents motor from staying disengaged
+        Moteus::PositionMode::Command engage_cmd;
+        engage_cmd.position = xbeeTargetM2;
+        engage_cmd.velocity = NaN;
+        engage_cmd.velocity_limit = 5.0;
+        engage_cmd.accel_limit = 800.0;
+        engage_cmd.maximum_torque = 1.2;
+        moteus2.SetPosition(engage_cmd, &position_fmt);
+        Serial.println(F("[XBee] Motor2 re-engaged at target position"));
       }
       
       // Any other control byte (0, 0xFF, etc.): Normal operation, continue processing
@@ -147,11 +184,10 @@ void updateXBee() {
         Serial.print(digit4);
         Serial.println();
 
-        // Map velocity: digit1 0-9 with custom mapping (lower values for finer control)
-        // 0→0, 1→10, 2→20, 3→30, 4→40, 5→50, 6→60, 7→70, 8→80, 9→100
-        // const float vel_map[10] = {0, 10, 20, 30, 40, 50, 60, 70, 80, 100};
-        // Workshop mapping: 0→0, 1→10, 2→20, 3→60, 4→80, 5-9→100
-        const float vel_map[10] = {0, 10, 20, 60, 80, 100, 100, 100, 100, 100};
+        // Map velocity: digit1 0-9 with custom mapping
+        // CRITICAL: NEVER use 0 velocity - causes motor disengage!
+        // 0→10, 1→10, 2→20, 3→60, 4→80, 5-9→100
+        const float vel_map[10] = {10, 10, 20, 60, 80, 100, 100, 100, 100, 100};
         float velocity = (digit1 <= 9) ? vel_map[digit1] : 100.0;
         
         // Map position: 0=stay, 1-4=negative range, 5=center, 6-9=positive range
@@ -192,12 +228,15 @@ void updateXBee() {
         Serial.println(pos2, 4);
 
         lastXBeeCommand = millis();
+        
+        // Only unsettled if target actually changes (>0.001 rev threshold)
+        if (abs(xbeeTargetM1 - pos1) > 0.001) m1_settled = false;
+        if (abs(xbeeTargetM2 - pos2) > 0.001) m2_settled = false;
+        
         xbeeTargetM1 = pos1;
         xbeeTargetM2 = pos2;
         xbeeMaxVelM1 = velocity;
         xbeeMaxVelM2 = velocity;
-        m1_settled = false;
-        m2_settled = false;
         xbeeControlActive = true;
         
         Serial.print(F("[XBee] Motor targets: M1="));
@@ -237,11 +276,10 @@ void updateXBee() {
         uint8_t digit3 = (value / 10) % 10;   // motor 2 position
         // uint8_t digit4 = value % 10;          // reserved
 
-        // Map velocity: digit1 0-9 with custom mapping (lower values for finer control)
-        // 0→0, 1→10, 2→20, 3→30, 4→40, 5→50, 6→60, 7→70, 8→80, 9→100
-        // const float vel_map[10] = {0, 10, 20, 30, 40, 50, 60, 70, 80, 100};
-        // Workshop mapping: 0→0, 1→10, 2→20, 3→60, 4→80, 5-9→100
-        const float vel_map[10] = {0, 10, 20, 60, 80, 100, 100, 100, 100, 100};
+        // Map velocity: digit1 0-9 with custom mapping
+        // CRITICAL: NEVER use 0 velocity - causes motor disengage!
+        // 0→10, 1→10, 2→20, 3→60, 4→80, 5-9→100
+        const float vel_map[10] = {10, 10, 20, 60, 80, 100, 100, 100, 100, 100};
         float velocity = (digit1 <= 9) ? vel_map[digit1] : 100.0;
         
         // Map position: 0=stay, 1-4=negative range, 5=center, 6-9=positive range
@@ -282,12 +320,15 @@ void updateXBee() {
         Serial.println(pos2, 4);
 
         lastXBeeCommand = millis();
+        
+        // Only unsettled if target actually changes (>0.001 rev threshold)
+        if (abs(xbeeTargetM1 - pos1) > 0.001) m1_settled = false;
+        if (abs(xbeeTargetM2 - pos2) > 0.001) m2_settled = false;
+        
         xbeeTargetM1 = pos1;
         xbeeTargetM2 = pos2;
         xbeeMaxVelM1 = velocity;
         xbeeMaxVelM2 = velocity;
-        m1_settled = false;
-        m2_settled = false;
         xbeeControlActive = true;
       }
       
@@ -372,14 +413,14 @@ bool parseXBeeCommand(String command) {
   
   // Format 3: Stop command
   if (command == "STOP" || command == "S") {
-    Serial.println(F("XBee: Emergency STOP"));
-    displayDebug("XBee STOP!");
+    Serial.println(F("XBee: Emergency STOP command IGNORED (Workshop Mode)"));
+    // displayDebug("XBee STOP!");
     
-    moteus1.SetStop();
-    moteus2.SetStop();
+    // moteus1.SetStop();  // DISABLED for workshop
+    // moteus2.SetStop();  // DISABLED for workshop
     
-    interruptCommand = true;
-    commandRunning = false;
+    // interruptCommand = true;
+    // commandRunning = false;
     
     return true;
   }
@@ -441,71 +482,131 @@ void updateXBeeControl() {
   
   // Debug: confirm control is active
   if (millis() - lastActiveDebug > 2000) {
-    Serial.print(F("[XBee Control] Active, targets: M1="));
+    Serial.print(F("[XBee Control] ACTIVE | Targets: M1="));
     Serial.print(xbeeTargetM1, 4);
     Serial.print(F(" M2="));
-    Serial.println(xbeeTargetM2, 4);
+    Serial.print(xbeeTargetM2, 4);
+    Serial.print(F(" | M1_settled="));
+    Serial.print(m1_settled ? "YES" : "NO");
+    Serial.print(F(" M2_settled="));
+    Serial.println(m2_settled ? "YES" : "NO");
     lastActiveDebug = millis();
   }
   
   bool shouldDebug = (millis() - lastDebug > 1000);
   
-  // Query current positions and velocities
+  // Query ONLY Motor2 (Motor1 is not used in workshop setup)
   Moteus::Query::Format query_fmt;
   query_fmt.mode = Moteus::kInt8;
   query_fmt.position = Moteus::kFloat;
   query_fmt.abs_position = Moteus::kFloat;
   query_fmt.velocity = Moteus::kFloat;
   query_fmt.motor_temperature = Moteus::kFloat;
-  moteus1.SetQuery(&query_fmt);
-  moteus2.SetQuery(&query_fmt);
+  query_fmt.fault = Moteus::kInt8;  // Query fault code
+  moteus2.SetQuery(&query_fmt);  // Only query Motor2
   
-  // Poll CAN bus for responses (more efficient than delay - allows other processing)
+  // Poll CAN bus for Motor2 response only
   unsigned long pollStart = micros();
   while (micros() - pollStart < 5000) {  // Max 5ms timeout
     // Process any pending CAN messages
-    if (!isnan(moteus1.last_result().values.abs_position) && 
-        !isnan(moteus2.last_result().values.abs_position)) {
-      break;  // Got both responses
+    if (!isnan(moteus2.last_result().values.abs_position)) {
+      break;  // Got Motor2 response
     }
   }
   
-  float currentM1 = moteus1.last_result().values.abs_position;
+  // Motor1 is not used - set dummy values
+  float currentM1 = 0.0;
+  float velM1 = 0.0;
+  
+  // Motor2 values
   float currentM2 = moteus2.last_result().values.abs_position;
-  float velM1 = moteus1.last_result().values.velocity;
   float velM2 = moteus2.last_result().values.velocity;
+  int fault2 = moteus2.last_result().values.fault;
+  auto mode2 = moteus2.last_result().values.mode;
   
   // Cache values for display
-  cachedM1Pos = currentM1;
+  cachedM1Pos = 0.0;  // Motor1 not used
   cachedM2Pos = currentM2;
-  cachedM1Temp = moteus1.last_result().values.motor_temperature;
+  cachedM1Temp = 0.0;  // Motor1 not used
   cachedM2Temp = moteus2.last_result().values.motor_temperature;
   
-  if (shouldDebug) {
-    Serial.print(F("[Query] M1 pos="));
-    Serial.print(currentM1, 3);
-    Serial.print(F(" temp="));
-    Serial.print(moteus1.last_result().values.motor_temperature, 1);
-    Serial.print(F(" M2 pos="));
-    Serial.print(currentM2, 3);
-    Serial.print(F(" temp="));
-    Serial.println(moteus2.last_result().values.motor_temperature, 1);
+  // Check for faults and attempt recovery
+  if (fault2 != 0) {
+    if (!m2_in_fault) {
+      // First detection of fault
+      m2_in_fault = true;
+      m2_fault_detected_time = millis();
+      Serial.print(F("!!! M2 FAULT CODE: "));
+      Serial.print(fault2);
+      Serial.print(F(" Mode: "));
+      Serial.print(static_cast<int>(mode2));
+      
+      if (fault2 == 33) {
+        Serial.println(F(" - CALIBRATION FAULT DETECTED!"));
+        Serial.println(F("[Recovery] Attempting to clear fault..."));
+        
+        // Attempt recovery: stop motor to clear fault state
+        moteus2.SetStop();
+        m2_recovery_attempts++;
+        
+        Serial.print(F("[Recovery] Attempt #"));
+        Serial.print(m2_recovery_attempts);
+        Serial.print(F("/"));
+        Serial.println(MAX_RECOVERY_ATTEMPTS);
+      } else {
+        Serial.println();
+      }
+    } else {
+      // Fault persists - check if we should retry
+      if (fault2 == 33 && m2_recovery_attempts < MAX_RECOVERY_ATTEMPTS) {
+        if (millis() - m2_fault_detected_time > RECOVERY_DELAY_MS) {
+          Serial.println(F("[Recovery] Retrying motor engagement..."));
+          m2_fault_detected_time = millis();
+          m2_recovery_attempts++;
+          
+          // Try stop and brief delay before next query
+          moteus2.SetStop();
+          delay(100);
+        }
+      } else if (m2_recovery_attempts >= MAX_RECOVERY_ATTEMPTS) {
+        // Give up after max attempts
+        static unsigned long last_fault_msg = 0;
+        if (millis() - last_fault_msg > 5000) {
+          Serial.println(F("!!! M2 HARDWARE FAULT - RECALIBRATION REQUIRED !!!"));
+          Serial.println(F("!!! Use moteus_tool: d stop, then d cal !!!"));
+          last_fault_msg = millis();
+        }
+      }
+    }
+  } else {
+    // Fault cleared!
+    if (m2_in_fault) {
+      Serial.println(F("[Recovery] M2 fault cleared successfully!"));
+      m2_in_fault = false;
+      m2_recovery_attempts = 0;
+    }
   }
   
-  // Calculate errors
-  float error1 = xbeeTargetM1 - currentM1;
+  if (shouldDebug) {
+    Serial.print(F("[Query] M1=DISABLED M2 pos="));
+    Serial.print(currentM2, 3);
+    Serial.print(F(" temp="));
+    Serial.print(moteus2.last_result().values.motor_temperature, 1);
+    Serial.print(F(" mode="));
+    Serial.print(static_cast<int>(mode2));
+    Serial.print(F(" fault="));
+    Serial.println(fault2);
+  }
+  
+  // Calculate error for Motor2 only
   float error2 = xbeeTargetM2 - currentM2;
   
   // Handle wrap-around
-  if (error1 > 0.5) error1 -= 1.0;
-  else if (error1 < -0.5) error1 += 1.0;
   if (error2 > 0.5) error2 -= 1.0;
   else if (error2 < -0.5) error2 += 1.0;
   
   if (shouldDebug) {
-    Serial.print(F("[Err] M1: err="));
-    Serial.print(error1, 3);
-    Serial.print(F(" M2: err="));
+    Serial.print(F("[Err] M1=DISABLED M2: err="));
     Serial.println(error2, 3);
   }
   
@@ -543,34 +644,25 @@ void updateXBeeControl() {
   // Calculate velocities with PD control
   float vel1 = 0, vel2 = 0;
   
-  // Motor 1 control
-  bool m1_active = abs(error1) > deadband;
+  // Motor1 is DISABLED - always inactive, always settled
   bool m2_active = abs(error2) > deadband;
   
-  // Check if motors have settled
-  if (!m1_active && !m1_settled) {
+  // Motor1: Always settled (not used)
+  if (!m1_settled) {
     m1_settled = true;
-    Serial.println(F("M1 settled"));
-  } else if (m1_active && m1_settled) {
-    m1_settled = false;  // Left deadband, no longer settled
+    Serial.println(F("[M1] DISABLED - auto-settled"));
   }
   
+  // Motor2: Check if settled
+  // CRITICAL: Only settle if BOTH position is at target AND motor has stopped moving
+  // This prevents premature settling during fast movements
   if (!m2_active && !m2_settled) {
-    m2_settled = true;
-    Serial.println(F("M2 settled"));
+    if (abs(velM2) < 0.05) {  // Motor must be nearly stopped (< 0.05 rev/s)
+      m2_settled = true;
+      Serial.println(F("M2 settled"));
+    }
   } else if (m2_active && m2_settled) {
     m2_settled = false;
-  }
-  
-  // Calculate velocities for active motors
-  // Motor 1 is not physically used - just keep it settled to avoid errors
-  if (m1_active) {
-    // Motor 1 not used in workshop setup, always set to settled
-    vel1 = 0.0;
-    if (!m1_settled) {
-      m1_settled = true;
-      Serial.println(F("M1 auto-settled (not used)"));
-    }
   }
   
   // Motor 2 control
@@ -582,10 +674,10 @@ void updateXBeeControl() {
       vel2 = error2 * Kp_near_m2 - velM2 * (Kd_m2 * 0.3);
     }
     vel2 = constrain(vel2, -max_vel_m2, max_vel_m2);
-    // Apply velocity deadband only at high speeds to eliminate jitter
-    // At slow speeds, allow creeping to reach exact target
-    if (max_vel_m2 >= 30.0 && abs(vel2) < 3.0) {
-      vel2 = 0.0;
+    // CRITICAL: Never allow vel2 to be exactly 0 - causes motor disengage
+    // Maintain minimum velocity to keep motor engaged
+    if (abs(vel2) < 1.0) {
+      vel2 = (vel2 >= 0) ? 1.0 : -1.0;
     }
   }
   
@@ -602,22 +694,31 @@ void updateXBeeControl() {
     lastDebug = millis();
   }
   
-  // Always send commands to keep motors engaged
-  // When settled, just send velocity=0 to hold in place
-  Moteus::PositionMode::Command cmd1;
-  cmd1.position = NaN;
-  cmd1.velocity = m1_settled ? 0.0 : vel1;
-  cmd1.velocity_limit = max_vel_m1;
-  cmd1.accel_limit = 800.0;
-  cmd1.maximum_torque = 1.2;  // Modest increase for better low-speed torque
+  // Motor1: Always send STOP command (not used in workshop)
+  moteus1.SetStop();
   
+  // Motor2: Skip commanding if in unrecoverable fault state
+  if (m2_in_fault && m2_recovery_attempts >= MAX_RECOVERY_ATTEMPTS) {
+    // Motor is in permanent fault, don't send commands
+    return;
+  }
+  
+  // Motor2: ALWAYS use position mode with calculated velocity
+  // CRITICAL: Never use settled state - always use calculated velocity
+  // This ensures motor never receives velocity too close to 0
   Moteus::PositionMode::Command cmd2;
-  cmd2.position = NaN;
-  cmd2.velocity = m2_settled ? 0.0 : vel2;
-  cmd2.velocity_limit = max_vel_m2;
+  cmd2.position = xbeeTargetM2;
   cmd2.accel_limit = 800.0;
-  cmd2.maximum_torque = 1.2;  // Modest increase for better low-speed torque
+  cmd2.maximum_torque = 1.2;
   
-  moteus1.SetPosition(cmd1, &position_fmt);
+  // ALWAYS use calculated velocity, enforce STRONG minimum to prevent disengage
+  // Moteus motors disengage with very low velocities, use minimum 5.0 rev/s
+  if (fabs(vel2) < 5.0) {
+    cmd2.velocity = (vel2 >= 0) ? 5.0 : -5.0;  // CRITICAL: Minimum 5.0 rev/s
+  } else {
+    cmd2.velocity = vel2;
+  }
+  cmd2.velocity_limit = max(max_vel_m2, 5.0);  // Ensure limit is also >= 5.0
+  
   moteus2.SetPosition(cmd2, &position_fmt);
 }
