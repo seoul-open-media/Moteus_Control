@@ -11,6 +11,9 @@ extern Moteus::PositionMode::Command position_cmd1;
 extern Moteus::PositionMode::Command position_cmd2;
 extern Moteus::PositionMode::Format position_fmt;
 
+// External reference to solenoid functions
+void triggerMotorBrake();
+
 // Global flag to interrupt current motor command
 extern volatile bool interruptCommand;
 extern volatile bool commandRunning;

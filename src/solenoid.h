@@ -23,4 +23,7 @@ void triggerTypeB_1();  // digit4=1: EM1, EM2 on
 void triggerTypeB_2();  // digit4=2: Solenoid, EM3 on
 void triggerTypeB_3();  // digit4=3: All on
 
+// Motor brake function - hold electromagnet for 500ms to prevent bounce
+void triggerMotorBrake();
+
 #endif

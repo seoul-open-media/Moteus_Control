@@ -364,8 +364,12 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
   unsigned long start_time = millis();
   unsigned long last_loop_time = millis();
   
-  bool motor1_done = (abs(ext_error1) < TOLERANCE);
-  bool motor2_done = (abs(ext_error2) < TOLERANCE);
+  bool motor1_done = (abs(ext_error1) < POSITION_TOLERANCE);
+  bool motor2_done = (abs(ext_error2) < POSITION_TOLERANCE);
+  
+  // Brake flags to ensure brake is only triggered once per motor
+  bool motor1_brake_applied = false;
+  bool motor2_brake_applied = false;
   
   // State tracking for stopping
   int motor1_stop_count = 0;
@@ -505,38 +509,55 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
         
         double abs_error1 = abs(error1);
         
-        // Check if we overshot
-        bool overshot = (prev_error1 * error1 < 0) && (abs_error1 > 0.4);
-        prev_error1 = error1;
-        
-        if (abs_error1 < TOLERANCE) {
-          motor1_stop_count++;
-          if (motor1_stop_count > 2) {
-            motor1_done = true;
-            // Disengage motor when target reached
-            moteus1.SetStop();
+        // Check for overshoot: only when close to target and error sign changes
+        // Only check if we're near target and previous error was also small
+        if (abs_error1 < OVERSHOOT_ZONE && abs(prev_error1) < OVERSHOOT_ZONE) {
+          if ((prev_error1 > 0 && error1 < 0) || (prev_error1 < 0 && error1 > 0)) {
+            if (!motor1_brake_applied) {
+              motor1_done = true;
+              motor1_brake_applied = true;
+              moteus1.SetStop();
+              triggerMotorBrake();
+              Serial.println(F("[MotorControl] Motor 1 OVERSHOOT DETECTED - STOPPED"));
+              break;
+            }
           }
+        }
+        prev_error1 = error1;  // Update previous error
+        
+        // Simple control: Check if within tolerance
+        if (abs_error1 < POSITION_TOLERANCE) {
+          motor1_stop_count++;
+          if (motor1_stop_count > 2 && !motor1_brake_applied) {  // 3 stable cycles (30ms) to confirm arrival
+            motor1_done = true;
+            motor1_brake_applied = true;  // Set flag to prevent re-triggering
+            // Disengage motor
+            moteus1.SetStop();
+            // Apply electromagnetic brake for 100ms to prevent bounce
+            triggerMotorBrake();
+            Serial.println(F("[MotorControl] Motor 1 STOPPED + BRAKE ENGAGED"));
+            // Exit immediately - don't send any more commands after SetStop
+            break;
+          }
+          // Slow final approach
+          double vel1 = (error1 > 0) ? 0.2 : -0.2;  // 0.2 rev/s constant
           position_cmd1.position = NaN;
-          position_cmd1.velocity = 0.5;  // Slow velocity while approaching
-        } else if (overshot || abs_error1 < BRAKE_ZONE) {
-          motor1_stop_count = 0;
-          motor1_done = false;
-          // Proportional brake for smooth stopping
-          double brake_vel = max(0.5, min(2.0, abs_error1 * 80.0)) * ((error1 > 0) ? 1.0 : -1.0);
-          position_cmd1.position = NaN;
-          position_cmd1.velocity = brake_vel * MOTOR1_DIRECTION;
+          position_cmd1.velocity = vel1 * MOTOR1_DIRECTION;
+          position_cmd1.maximum_torque = 3.0;
         } else {
+          // Far zone - maximum speed
           motor1_stop_count = 0;
           motor1_done = false;
           double vel_magnitude;
           if (abs_error1 > SLOW_ZONE) {
             vel_magnitude = MAX_VELOCITY;
           } else {
-            vel_magnitude = max(3.0, MAX_VELOCITY * (abs_error1 / SLOW_ZONE));
+            vel_magnitude = max(1.0, MAX_VELOCITY * (abs_error1 / SLOW_ZONE));
           }
           double vel1 = (error1 > 0) ? vel_magnitude : -vel_magnitude;
           position_cmd1.position = NaN;
           position_cmd1.velocity = vel1 * MOTOR1_DIRECTION;
+          position_cmd1.maximum_torque = 3.0;
         }
       }
       
@@ -616,61 +637,65 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
         
         double abs_error2 = abs(error2);
         
-        // Check if we overshot
-        bool overshot = (prev_error2 * error2 < 0) && (abs_error2 > 0.4);
-        prev_error2 = error2;
-        
-        if (abs_error2 < DEADBAND) {
-          motor2_stop_count++;
-          if (motor2_stop_count > 1) {  // 1 stable cycle (10ms) - immediate completion
-            motor2_done = true;
-            // Disengage motor when stable
-            moteus2.SetStop();
+        // Check for overshoot: only when close to target and error sign changes
+        // Only check if we're near target and previous error was also small
+        if (abs_error2 < OVERSHOOT_ZONE && abs(prev_error2) < OVERSHOOT_ZONE) {
+          if ((prev_error2 > 0 && error2 < 0) || (prev_error2 < 0 && error2 > 0)) {
+            if (!motor2_brake_applied) {
+              motor2_done = true;
+              motor2_brake_applied = true;
+              moteus2.SetStop();
+              triggerMotorBrake();
+              Serial.println(F("[MotorControl] Motor 2 OVERSHOOT DETECTED - STOPPED"));
+              break;
+            }
           }
-          // Extremely gentle final approach with ultra-low torque to prevent bounce
-          double vel_magnitude = abs_error2 * 0.5;  // 0.5:1 ratio - very gentle
-          vel_magnitude = max(0.003, min(0.008, vel_magnitude));  // Very slow: 0.003-0.008 rev/s
-          double vel2 = (error2 > 0) ? vel_magnitude : -vel_magnitude;
+        }
+        prev_error2 = error2;  // Update previous error
+        
+        // Simple control: Check if within tolerance
+        if (abs_error2 < POSITION_TOLERANCE) {
+          motor2_stop_count++;
+          if (motor2_stop_count > 2 && !motor2_brake_applied) {  // 3 stable cycles (30ms) to confirm arrival
+            motor2_done = true;
+            motor2_brake_applied = true;  // Set flag to prevent re-triggering
+            // Disengage motor
+            moteus2.SetStop();
+            // Apply electromagnetic brake for 100ms to prevent bounce
+            triggerMotorBrake();
+            Serial.println(F("[MotorControl] Motor 2 STOPPED + BRAKE ENGAGED"));
+            // Exit immediately - don't send any more commands after SetStop
+            break;
+          }
+          // Slow final approach
+          double vel2 = (error2 > 0) ? 0.2 : -0.2;  // 0.2 rev/s constant
           position_cmd2.position = NaN;
           position_cmd2.velocity = vel2 * MOTOR2_DIRECTION;
-          position_cmd2.maximum_torque = 0.02;  // Ultra-minimal torque to prevent bounce
-        } else if (abs_error2 < TOLERANCE) {
-          motor2_stop_count = 0;
-          motor2_done = false;
-          // Gentler approach to DEADBAND with lower velocities
-          double vel_magnitude = abs_error2 * 2.0;  // Reduced from 3.0 to 2.0
-          vel_magnitude = max(0.02, min(0.04, vel_magnitude));  // Reduced from 0.04-0.06
-          double vel2 = (error2 > 0) ? vel_magnitude : -vel_magnitude;
-          position_cmd2.position = NaN;
-          position_cmd2.velocity = vel2 * MOTOR2_DIRECTION;
-          position_cmd2.maximum_torque = 0.15;  // Lower torque for smoother DEADBAND entry
-        } else if (abs_error2 < BRAKE_ZONE) {
-          motor2_stop_count = 0;
-          motor2_done = false;
-          // Faster proportional velocity to reach target before timeout
-          double vel_magnitude = max(0.10, min(0.30, abs_error2 * 2.5));
-          double vel2 = (error2 > 0) ? vel_magnitude : -vel_magnitude;
-          position_cmd2.position = NaN;
-          position_cmd2.velocity = vel2 * MOTOR2_DIRECTION;
-          position_cmd2.maximum_torque = 0.5;  // Moderate torque
+          position_cmd2.maximum_torque = 3.0;
         } else {
+          // Far zone - maximum speed
           motor2_stop_count = 0;
           motor2_done = false;
           double vel_magnitude;
           if (abs_error2 > SLOW_ZONE) {
             vel_magnitude = MAX_VELOCITY;
           } else {
-            vel_magnitude = max(3.0, MAX_VELOCITY * (abs_error2 / SLOW_ZONE));
+            vel_magnitude = max(1.0, MAX_VELOCITY * (abs_error2 / SLOW_ZONE));
           }
           double vel2 = (error2 > 0) ? vel_magnitude : -vel_magnitude;
           position_cmd2.position = NaN;
           position_cmd2.velocity = vel2 * MOTOR2_DIRECTION;
+          position_cmd2.maximum_torque = 3.0;
         }
       }
       
-      // Send velocity commands
-      moteus1.SetPosition(position_cmd1, &position_fmt, &query_fmt);
-      moteus2.SetPosition(position_cmd2, &position_fmt, &query_fmt);
+      // Send velocity commands only if motors are not done
+      if (!motor1_done) {
+        moteus1.SetPosition(position_cmd1, &position_fmt, &query_fmt);
+      }
+      if (!motor2_done) {
+        moteus2.SetPosition(position_cmd2, &position_fmt, &query_fmt);
+      }
       
       // Update reading index for stall detection (circular buffer)
       reading_index = (reading_index + 1) % STALL_BUFFER_SIZE;
