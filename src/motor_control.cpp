@@ -513,13 +513,16 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
           motor1_stop_count++;
           if (motor1_stop_count > 2) {
             motor1_done = true;
+            // Disengage motor when target reached
+            moteus1.SetStop();
           }
           position_cmd1.position = NaN;
-          position_cmd1.velocity = 0.5;  // CRITICAL: Never use 0 - causes disengage!
+          position_cmd1.velocity = 0.5;  // Slow velocity while approaching
         } else if (overshot || abs_error1 < BRAKE_ZONE) {
           motor1_stop_count = 0;
           motor1_done = false;
-          double brake_vel = 2.0 * ((error1 > 0) ? 1.0 : -1.0);
+          // Proportional brake for smooth stopping
+          double brake_vel = max(0.5, min(2.0, abs_error1 * 80.0)) * ((error1 > 0) ? 1.0 : -1.0);
           position_cmd1.position = NaN;
           position_cmd1.velocity = brake_vel * MOTOR1_DIRECTION;
         } else {
@@ -617,19 +620,39 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
         bool overshot = (prev_error2 * error2 < 0) && (abs_error2 > 0.4);
         prev_error2 = error2;
         
-        if (abs_error2 < TOLERANCE) {
+        if (abs_error2 < DEADBAND) {
           motor2_stop_count++;
-          if (motor2_stop_count > 2) {
+          if (motor2_stop_count > 1) {  // 1 stable cycle (10ms) - immediate completion
             motor2_done = true;
+            // Disengage motor when stable
+            moteus2.SetStop();
           }
+          // Extremely gentle final approach with ultra-low torque to prevent bounce
+          double vel_magnitude = abs_error2 * 0.5;  // 0.5:1 ratio - very gentle
+          vel_magnitude = max(0.003, min(0.008, vel_magnitude));  // Very slow: 0.003-0.008 rev/s
+          double vel2 = (error2 > 0) ? vel_magnitude : -vel_magnitude;
           position_cmd2.position = NaN;
-          position_cmd2.velocity = 0.5;  // CRITICAL: Never use 0 - causes disengage!
-        } else if (overshot || abs_error2 < BRAKE_ZONE) {
+          position_cmd2.velocity = vel2 * MOTOR2_DIRECTION;
+          position_cmd2.maximum_torque = 0.02;  // Ultra-minimal torque to prevent bounce
+        } else if (abs_error2 < TOLERANCE) {
           motor2_stop_count = 0;
           motor2_done = false;
-          double brake_vel = 2.0 * ((error2 > 0) ? 1.0 : -1.0);
+          // Gentler approach to DEADBAND with lower velocities
+          double vel_magnitude = abs_error2 * 2.0;  // Reduced from 3.0 to 2.0
+          vel_magnitude = max(0.02, min(0.04, vel_magnitude));  // Reduced from 0.04-0.06
+          double vel2 = (error2 > 0) ? vel_magnitude : -vel_magnitude;
           position_cmd2.position = NaN;
-          position_cmd2.velocity = brake_vel * MOTOR2_DIRECTION;
+          position_cmd2.velocity = vel2 * MOTOR2_DIRECTION;
+          position_cmd2.maximum_torque = 0.15;  // Lower torque for smoother DEADBAND entry
+        } else if (abs_error2 < BRAKE_ZONE) {
+          motor2_stop_count = 0;
+          motor2_done = false;
+          // Faster proportional velocity to reach target before timeout
+          double vel_magnitude = max(0.10, min(0.30, abs_error2 * 2.5));
+          double vel2 = (error2 > 0) ? vel_magnitude : -vel_magnitude;
+          position_cmd2.position = NaN;
+          position_cmd2.velocity = vel2 * MOTOR2_DIRECTION;
+          position_cmd2.maximum_torque = 0.5;  // Moderate torque
         } else {
           motor2_stop_count = 0;
           motor2_done = false;

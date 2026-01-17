@@ -37,10 +37,11 @@ static const int MOTOR2_ID = 2;
 //——————————————————————————————————————————————————————————————————————————————
 //  Control Parameters
 //——————————————————————————————————————————————————————————————————————————————
-static const double TOLERANCE = 0.05;       // Position tolerance (external revolutions)
-static const double MAX_VELOCITY = 15.0;    // Maximum velocity (rev/s)
-static const double SLOW_ZONE = 0.10;       // Start slowing down within this distance
-static const double BRAKE_ZONE = 0.06;      // Active braking zone
+static const double TOLERANCE = 0.050;      // Position tolerance (18 degrees) - same as DEADBAND
+static const double DEADBAND = 0.050;        // Stop command zone (18 degrees) - wide for easy completion
+static const double MAX_VELOCITY = 2.0;     // Maximum velocity (rev/s) - very slow for stability
+static const double SLOW_ZONE = 0.15;       // Start slowing down within this distance
+static const double BRAKE_ZONE = 0.10;      // Active braking zone (36 degrees)
 static const unsigned long LOOP_PERIOD_MS = 10;  // 100Hz control loop (10ms)
 static const unsigned long TIMEOUT_MS = 15000;   // 15 second timeout
 

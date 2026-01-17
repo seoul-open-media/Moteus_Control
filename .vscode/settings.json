@@ -1,0 +1,12 @@
+{
+    "platformio-ide.defaultToolbarBuildAction": "release",
+    "platformio-ide.forceUploadAndMonitor": false,
+    "platformio-ide.useBuiltinPIOCore": true,
+    "platformio-ide.customPATH": null,
+    "platformio-ide.activateOnlyOnPlatformIOProject": false,
+    "platformio-ide.disableToolbar": false,
+    "platformio-ide.autoRebuildAutocompleteIndex": true,
+    "platformio-ide.autoCloseSerialMonitor": true,
+    "platformio-ide.serialMonitorPort": "/dev/teensy",
+    "platformio-ide.uploadPort": "/dev/teensy"
+}

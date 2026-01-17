@@ -182,34 +182,8 @@ void loop() {
   if (val.length() > 0) {
     // Simple single-digit commands for preset positions
     if (val == "1") {
-      Serial.println(F("Command 1: Moving Motor 1 to encoder position -0.25"));
-      displayDebug("M1 -> -0.25");
-      // Query motors first to get current positions
-      Moteus::Query::Format query_fmt;
-      query_fmt.abs_position = Moteus::kFloat;
-      moteus1.SetQuery(&query_fmt);
-      moteus2.SetQuery(&query_fmt);
-      delay(50);
-      double current_ext2 = moteus2.last_result().values.abs_position;
-      moveToEncoderPosition(-0.25, current_ext2);
-    }
-    
-    else if (val == "2") {
-      Serial.println(F("Command 2: Moving Motor 1 to encoder position 0.25"));
-      displayDebug("M1 -> 0.25");
-      // Query motors first to get current positions
-      Moteus::Query::Format query_fmt;
-      query_fmt.abs_position = Moteus::kFloat;
-      moteus1.SetQuery(&query_fmt);
-      moteus2.SetQuery(&query_fmt);
-      delay(50);
-      double current_ext2 = moteus2.last_result().values.abs_position;
-      moveToEncoderPosition(0.25, current_ext2);
-    }
-    
-    else if (val == "3") {
-      Serial.println(F("Command 3: Moving Motor 2 to encoder position -0.25"));
-      displayDebug("M2 -> -0.25");
+      Serial.println(F("Command 1: Moving Motor 2 to 0 degrees"));
+      displayDebug("M2 -> 0deg");
       // Query motors first to get current positions
       Moteus::Query::Format query_fmt;
       query_fmt.abs_position = Moteus::kFloat;
@@ -217,7 +191,33 @@ void loop() {
       moteus2.SetQuery(&query_fmt);
       delay(50);
       double current_ext1 = moteus1.last_result().values.abs_position;
-      moveToEncoderPosition(current_ext1, -0.25);
+      moveToEncoderPosition(current_ext1, 0.0);  // 0 degrees = 0.0 rev
+    }
+    
+    else if (val == "2") {
+      Serial.println(F("Command 2: Moving Motor 2 to -45 degrees"));
+      displayDebug("M2 -> -45deg");
+      // Query motors first to get current positions
+      Moteus::Query::Format query_fmt;
+      query_fmt.abs_position = Moteus::kFloat;
+      moteus1.SetQuery(&query_fmt);
+      moteus2.SetQuery(&query_fmt);
+      delay(50);
+      double current_ext1 = moteus1.last_result().values.abs_position;
+      moveToEncoderPosition(current_ext1, -0.125);  // -45 degrees = -0.125 rev
+    }
+    
+    else if (val == "3") {
+      Serial.println(F("Command 3: Moving Motor 2 to 45 degrees"));
+      displayDebug("M2 -> 45deg");
+      // Query motors first to get current positions
+      Moteus::Query::Format query_fmt;
+      query_fmt.abs_position = Moteus::kFloat;
+      moteus1.SetQuery(&query_fmt);
+      moteus2.SetQuery(&query_fmt);
+      delay(50);
+      double current_ext1 = moteus1.last_result().values.abs_position;
+      moveToEncoderPosition(current_ext1, 0.125);  // 45 degrees = 0.125 rev
     }
     
     else if (val == "4") {

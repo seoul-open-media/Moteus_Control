@@ -4,9 +4,16 @@
 		{
 			"label": "PlatformIO Upload with Debug",
 			"type": "shell",
-			"command": "platformio run --target upload",
+			"command": "platformio run --target upload --upload-port /dev/teensy",
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "PlatformIO Monitor",
+			"type": "shell",
+			"command": "platformio device monitor --port /dev/teensy",
+			"problemMatcher": [],
+			"isBackground": true
 		}
 	]
 }
