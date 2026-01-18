@@ -13,12 +13,19 @@ static bool em3_active = false;
 static bool sol_active = false;
 
 static const unsigned long PULSE_DURATION_MS = 50;
-static const unsigned long BRAKE_DURATION_MS = 200;  // 200ms for motor brake
 
 static unsigned long em1_duration = PULSE_DURATION_MS;
 static unsigned long em2_duration = PULSE_DURATION_MS;
 static unsigned long em3_duration = PULSE_DURATION_MS;
 static unsigned long sol_duration = PULSE_DURATION_MS;
+
+// Encoder-based brake monitoring
+static bool brake_mode_active = false;  // Is brake in encoder-monitoring mode?
+static double prev_ext1 = 0.0;
+static double prev_ext2 = 0.0;
+static unsigned long last_encoder_check = 0;
+static unsigned long brake_start_time = 0;
+static int stable_check_count = 0;  // Count consecutive stable checks
 
 void initSolenoid() {
   pinMode(EM1_PIN, OUTPUT);
@@ -38,24 +45,96 @@ void initSolenoid() {
 void updateSolenoid() {
   unsigned long now = millis();
   
-  // Check EM1 timing
-  if (em1_active && (now - em1_trigger_time >= em1_duration)) {
+  // If brake mode is active, check encoder changes instead of time
+  if (brake_mode_active) {
+    // Check if it's time to evaluate encoder changes
+    if (now - last_encoder_check >= BRAKE_CHECK_INTERVAL_MS) {
+      double ext1_change = abs(prev_ext1);
+      double ext2_change = abs(prev_ext2);
+      double max_change = max(ext1_change, ext2_change);
+      
+      // Safety: maximum brake duration
+      unsigned long brake_elapsed = now - brake_start_time;
+      
+      // Don't release brake before minimum duration
+      if (brake_elapsed < MIN_BRAKE_DURATION_MS) {
+        Serial.print(F("[Solenoid] Brake held (min time, elapsed="));
+        Serial.print(brake_elapsed);
+        Serial.print(F("ms, change="));
+        Serial.print(max_change, 5);
+        Serial.println(F(")"));
+        prev_ext1 = 0.0;
+        prev_ext2 = 0.0;
+        last_encoder_check = now;
+        return;
+      }
+      
+      if (max_change < ENCODER_CHANGE_THRESHOLD) {
+        // Motor might be stopped - increment stable count
+        stable_check_count++;
+        Serial.print(F("[Solenoid] Stable check "));
+        Serial.print(stable_check_count);
+        Serial.print(F("/"));
+        Serial.print(BRAKE_STABLE_CHECKS);
+        Serial.print(F(" (change="));
+        Serial.print(max_change, 5);
+        Serial.print(F(", elapsed="));
+        Serial.print(brake_elapsed);
+        Serial.println(F("ms)"));
+        
+        if (stable_check_count >= BRAKE_STABLE_CHECKS) {
+          // Motor confirmed stopped - release brake
+          Serial.print(F("[Solenoid] Motor stopped ("));
+          Serial.print(stable_check_count);
+          Serial.print(F(" stable checks, elapsed="));
+          Serial.print(brake_elapsed);
+          Serial.println(F("ms) - Releasing brake"));
+          stopMotorBrake();
+        }
+      } else if (brake_elapsed >= MAX_BRAKE_DURATION_MS) {
+        // Safety timeout
+        Serial.print(F("[Solenoid] Brake timeout ("));
+        Serial.print(brake_elapsed);
+        Serial.println(F("ms) - Releasing brake"));
+        stopMotorBrake();
+      } else {
+        // Motor still moving - reset stable count and continue brake
+        stable_check_count = 0;
+        Serial.print(F("[Solenoid] Motor moving (change="));
+        Serial.print(max_change, 5);
+        Serial.print(F(", elapsed="));
+        Serial.print(brake_elapsed);
+        Serial.println(F("ms) - Brake held"));
+      }
+      
+      // Reset for next check
+      prev_ext1 = 0.0;
+      prev_ext2 = 0.0;
+      last_encoder_check = now;
+    }
+    return;  // Skip normal timing checks when in brake mode
+  }
+  
+  // Normal timing-based checks for other solenoid functions
+  
+  // Check EM1 timing (skip if in brake mode)
+  if (em1_active && !brake_mode_active && (now - em1_trigger_time >= em1_duration)) {
     analogWrite(EM1_PIN, 0);
     em1_active = false;
     em1_duration = PULSE_DURATION_MS;  // Reset to default
     Serial.println(F("[Solenoid] EM1 OFF"));
   }
   
-  // Check EM2 timing
-  if (em2_active && (now - em2_trigger_time >= em2_duration)) {
+  // Check EM2 timing (skip if in brake mode)
+  if (em2_active && !brake_mode_active && (now - em2_trigger_time >= em2_duration)) {
     analogWrite(EM2_PIN, 0);
     em2_active = false;
     em2_duration = PULSE_DURATION_MS;  // Reset to default
     Serial.println(F("[Solenoid] EM2 OFF"));
   }
   
-  // Check EM3 timing
-  if (em3_active && (now - em3_trigger_time >= em3_duration)) {
+  // Check EM3 timing (skip if in brake mode)
+  if (em3_active && !brake_mode_active && (now - em3_trigger_time >= em3_duration)) {
     analogWrite(EM3_PIN, 0);
     em3_active = false;
     em3_duration = PULSE_DURATION_MS;  // Reset to default
@@ -101,26 +180,6 @@ void triggerSolenoid() {
   Serial.println(F("[Solenoid] SOLENOID ON (50ms)"));
 }
 
-// Type A control functions
-void triggerTypeA_1() {
-  // EM1, EM2, EM3 on
-  unsigned long now = millis();
-  
-  analogWrite(EM1_PIN, 255);
-  em1_active = true;
-  em1_trigger_time = now;
-  
-  analogWrite(EM2_PIN, 255);
-  em2_active = true;
-  em2_trigger_time = now;
-  
-  analogWrite(EM3_PIN, 255);
-  em3_active = true;
-  em3_trigger_time = now;
-  
-  Serial.println(F("[Solenoid] TypeA-1: EM1+EM2+EM3 ON (50ms)"));
-}
-
 void triggerTypeA_2() {
   // Solenoid on
   unsigned long now = millis();
@@ -132,91 +191,13 @@ void triggerTypeA_2() {
   Serial.println(F("[Solenoid] TypeA-2: SOLENOID ON (50ms)"));
 }
 
-void triggerTypeA_3() {
-  // All on
-  unsigned long now = millis();
-  
-  analogWrite(EM1_PIN, 255);
-  em1_active = true;
-  em1_trigger_time = now;
-  
-  analogWrite(EM2_PIN, 255);
-  em2_active = true;
-  em2_trigger_time = now;
-  
-  analogWrite(EM3_PIN, 255);
-  em3_active = true;
-  em3_trigger_time = now;
-  
-  analogWrite(SOLENOID_PIN, 255);
-  sol_active = true;
-  sol_trigger_time = now;
-  
-  Serial.println(F("[Solenoid] TypeA-3: ALL ON (50ms)"));
-}
-
-// Type B control functions
-void triggerTypeB_1() {
-  // EM1, EM2 on
-  unsigned long now = millis();
-  
-  analogWrite(EM1_PIN, 255);
-  em1_active = true;
-  em1_trigger_time = now;
-  
-  analogWrite(EM2_PIN, 255);
-  em2_active = true;
-  em2_trigger_time = now;
-  
-  Serial.println(F("[Solenoid] TypeB-1: EM1+EM2 ON (50ms)"));
-}
-
-void triggerTypeB_2() {
-  // Solenoid, EM3 on
-  unsigned long now = millis();
-  
-  analogWrite(SOLENOID_PIN, 255);
-  sol_active = true;
-  sol_trigger_time = now;
-  
-  analogWrite(EM3_PIN, 255);
-  em3_active = true;
-  em3_trigger_time = now;
-  
-  Serial.println(F("[Solenoid] TypeB-2: SOLENOID+EM3 ON (50ms)"));
-}
-
-void triggerTypeB_3() {
-  // All on
-  unsigned long now = millis();
-  
-  analogWrite(EM1_PIN, 255);
-  em1_active = true;
-  em1_trigger_time = now;
-  
-  analogWrite(EM2_PIN, 255);
-  em2_active = true;
-  em2_trigger_time = now;
-  
-  analogWrite(EM3_PIN, 255);
-  em3_active = true;
-  em3_trigger_time = now;
-  
-  analogWrite(SOLENOID_PIN, 255);
-  sol_active = true;
-  sol_trigger_time = now;
-  
-  Serial.println(F("[Solenoid] TypeB-3: ALL ON (50ms)"));
-}
-
 void triggerMotorBrake() {
-  // Turn on all electromagnets for 100ms to act as motor brake
+  // Turn on all electromagnets - will hold until encoder change < threshold
   unsigned long now = millis();
   
   analogWrite(EM1_PIN, 255);
   em1_active = true;
   em1_trigger_time = now;
-  em1_duration = BRAKE_DURATION_MS;  // 1000ms for brake
   Serial.print(F("[Solenoid] EM1 PIN "));
   Serial.print(EM1_PIN);
   Serial.println(F(" = 255"));
@@ -224,7 +205,6 @@ void triggerMotorBrake() {
   analogWrite(EM2_PIN, 255);
   em2_active = true;
   em2_trigger_time = now;
-  em2_duration = BRAKE_DURATION_MS;  // 1000ms for brake
   Serial.print(F("[Solenoid] EM2 PIN "));
   Serial.print(EM2_PIN);
   Serial.println(F(" = 255"));
@@ -232,10 +212,55 @@ void triggerMotorBrake() {
   analogWrite(EM3_PIN, 255);
   em3_active = true;
   em3_trigger_time = now;
-  em3_duration = BRAKE_DURATION_MS;  // 1000ms for brake
   Serial.print(F("[Solenoid] EM3 PIN "));
   Serial.print(EM3_PIN);
   Serial.println(F(" = 255"));
   
-  Serial.println(F("[Solenoid] MOTOR BRAKE: EM1+EM2+EM3 ON (200ms)"));
+  // Enable encoder-based brake monitoring
+  brake_mode_active = true;
+  brake_start_time = now;
+  last_encoder_check = now;
+  prev_ext1 = 0.0;
+  prev_ext2 = 0.0;
+  stable_check_count = 0;  // Reset stable counter
+  
+  Serial.print(F("[Solenoid] MOTOR BRAKE: EM1+EM2+EM3 ON (min "));
+  Serial.print(MIN_BRAKE_DURATION_MS);
+  Serial.print(F("ms, until "));
+  Serial.print(BRAKE_STABLE_CHECKS);
+  Serial.print(F(" stable checks < "));
+  Serial.print(ENCODER_CHANGE_THRESHOLD, 5);
+  Serial.println(F(" rev)"));
+}
+
+void updateBrakeEncoders(double ext1, double ext2) {
+  // Accumulate encoder changes since last check
+  // This is called from motor control loop
+  if (brake_mode_active) {
+    prev_ext1 += abs(ext1);
+    prev_ext2 += abs(ext2);
+  }
+}
+
+void stopMotorBrake() {
+  // Manually stop the brake
+  analogWrite(EM1_PIN, 0);
+  em1_active = false;
+  em1_duration = PULSE_DURATION_MS;
+  Serial.println(F("[Solenoid] EM1 OFF"));
+  
+  analogWrite(EM2_PIN, 0);
+  em2_active = false;
+  em2_duration = PULSE_DURATION_MS;
+  Serial.println(F("[Solenoid] EM2 OFF"));
+  
+  analogWrite(EM3_PIN, 0);
+  em3_active = false;
+  em3_duration = PULSE_DURATION_MS;
+  Serial.println(F("[Solenoid] EM3 OFF"));
+  
+  brake_mode_active = false;
+  prev_ext1 = 0.0;
+  prev_ext2 = 0.0;
+  stable_check_count = 0;  // Reset stable counter
 }

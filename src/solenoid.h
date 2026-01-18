@@ -18,12 +18,13 @@ void triggerTypeA_1();  // digit4=1: EM1, EM2, EM3 on
 void triggerTypeA_2();  // digit4=2: Solenoid on
 void triggerTypeA_3();  // digit4=3: All on
 
-// Type B control functions
-void triggerTypeB_1();  // digit4=1: EM1, EM2 on
-void triggerTypeB_2();  // digit4=2: Solenoid, EM3 on
-void triggerTypeB_3();  // digit4=3: All on
-
-// Motor brake function - hold electromagnet for 500ms to prevent bounce
+// Motor brake function - hold electromagnet until motor stops moving
 void triggerMotorBrake();
+
+// Update encoder positions for brake monitoring
+void updateBrakeEncoders(double ext1, double ext2);
+
+// Stop motor brake manually
+void stopMotorBrake();
 
 #endif

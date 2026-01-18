@@ -1,7 +1,8 @@
 #include "motor_control.h"
 #include "config.h"
 #include "display.h"
-#include "neokey.h"
+// REMOVED: #include "neokey.h"
+#include "solenoid.h"
 
 // Global flag to interrupt current motor command
 volatile bool interruptCommand = false;
@@ -225,21 +226,8 @@ void oscillateMotors() {
   Serial.println(F("Using continuous sine wave velocity"));
   
   while (true) {
-    // Check NeoKey for button presses (especially STOP button)
-    static unsigned long lastNeoKeyCheck = 0;
+    // REMOVED: NeoKey check (NeoKey hardware removed)
     unsigned long current_time = millis();
-    if (current_time - lastNeoKeyCheck >= 50) {  // Check every 50ms
-      uint8_t buttons = neokey.read();
-      // Check if STOP button (key 3) is pressed
-      if (buttons & (1 << KEY_STOP)) {
-        Serial.println(F("STOP button pressed during oscillation!"));
-        displayDebug("K: STOP!");
-        setKeyColor(KEY_STOP, COLOR_RED);
-        interruptCommand = true;
-        lastNeoKeyCheck = current_time;
-      }
-      lastNeoKeyCheck = current_time;
-    }
     
     // Check for interrupt command from serial input
     if (Serial.available()) {
@@ -257,8 +245,7 @@ void oscillateMotors() {
       moteus1.SetStop();
       moteus2.SetStop();
       
-      // Reset STOP key LED if it was the stop button
-      setKeyColor(KEY_STOP, COLOR_DIM_RED);
+      // REMOVED: NeoKey LED reset
       return;
     }
     
@@ -304,11 +291,16 @@ void oscillateMotors() {
   }
 }
 
-void moveToEncoderPosition(double target_ext1, double target_ext2) {
+void moveToEncoderPosition(double target_ext1, double target_ext2, float max_speed_limit) {
   commandRunning = true;
   interruptCommand = false;
   
+  // Use default MAX_VELOCITY if not specified
+  if (max_speed_limit < 0) max_speed_limit = MAX_VELOCITY;
+  
   Serial.println(F("=== Move to Encoder Position ==="));
+  Serial.print(F("Speed Limit: "));
+  Serial.println(max_speed_limit);
   
   char buf[32];
   snprintf(buf, sizeof(buf), "Tgt: %.2f,%.2f", target_ext1, target_ext2);
@@ -377,6 +369,10 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
   double prev_error1 = ext_error1;
   double prev_error2 = ext_error2;
   
+  // For encoder change tracking
+  double prev_ext1_pos = current_ext1;
+  double prev_ext2_pos = current_ext2;
+  
   // Set high velocity and acceleration limits
   position_cmd1.velocity_limit = 20.0;
   position_cmd1.accel_limit = 10.0;
@@ -389,20 +385,10 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
   while (true) {
     unsigned long current_time = millis();
     
-    // Check NeoKey for button presses (especially STOP button)
-    static unsigned long lastNeoKeyCheck = 0;
-    if (current_time - lastNeoKeyCheck >= 50) {  // Check every 50ms
-      uint8_t buttons = neokey.read();
-      // Check if STOP button (key 3) is pressed
-      if (buttons & (1 << KEY_STOP)) {
-        Serial.println(F("STOP button pressed during movement!"));
-        displayDebug("K: STOP!");
-        setKeyColor(KEY_STOP, COLOR_RED);
-        interruptCommand = true;
-        lastNeoKeyCheck = current_time;
-      }
-      lastNeoKeyCheck = current_time;
-    }
+    // Update solenoid state (turn off if duration exprired)
+    updateSolenoid();
+    
+    // REMOVED: NeoKey check (NeoKey hardware removed)
     
     // Check for interrupt command from serial input
     if (Serial.available()) {
@@ -420,8 +406,7 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       moteus1.SetStop();
       moteus2.SetStop();
       
-      // Reset STOP key LED if it was the stop button
-      setKeyColor(KEY_STOP, COLOR_DIM_RED);
+      // REMOVED: NeoKey LED reset
       return;
     }
     
@@ -432,6 +417,21 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
       // Get current encoder positions
       const bool got1 = moteus1.SetQuery(&query_fmt);
       const bool got2 = moteus2.SetQuery(&query_fmt);
+      
+      // Update brake monitoring with encoder changes
+      if (got1 && got2) {
+        double current_ext1 = moteus1.last_result().values.abs_position;
+        double current_ext2 = moteus2.last_result().values.abs_position;
+        
+        double delta_ext1 = current_ext1 - prev_ext1_pos;
+        double delta_ext2 = current_ext2 - prev_ext2_pos;
+        
+        // Update brake system with encoder changes
+        updateBrakeEncoders(delta_ext1, delta_ext2);
+        
+        prev_ext1_pos = current_ext1;
+        prev_ext2_pos = current_ext2;
+      }
       
       // Motor 1 control logic
       if (got1) {
@@ -492,8 +492,7 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
             commandRunning = false;
             interruptCommand = false;
             
-            // Reset STOP key LED
-            setKeyColor(KEY_STOP, COLOR_DIM_RED);
+            // REMOVED: NeoKey LED reset
             return;
           }
         }
@@ -550,9 +549,9 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
           motor1_done = false;
           double vel_magnitude;
           if (abs_error1 > SLOW_ZONE) {
-            vel_magnitude = MAX_VELOCITY;
+            vel_magnitude = max_speed_limit;
           } else {
-            vel_magnitude = max(1.0, MAX_VELOCITY * (abs_error1 / SLOW_ZONE));
+            vel_magnitude = max(0.5, max_speed_limit * (abs_error1 / SLOW_ZONE));
           }
           double vel1 = (error1 > 0) ? vel_magnitude : -vel_magnitude;
           position_cmd1.position = NaN;
@@ -620,8 +619,7 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
             commandRunning = false;
             interruptCommand = false;
             
-            // Reset STOP key LED
-            setKeyColor(KEY_STOP, COLOR_DIM_RED);
+            // REMOVED: NeoKey LED reset
             return;
           }
         }
@@ -678,9 +676,9 @@ void moveToEncoderPosition(double target_ext1, double target_ext2) {
           motor2_done = false;
           double vel_magnitude;
           if (abs_error2 > SLOW_ZONE) {
-            vel_magnitude = MAX_VELOCITY;
+            vel_magnitude = max_speed_limit;
           } else {
-            vel_magnitude = max(1.0, MAX_VELOCITY * (abs_error2 / SLOW_ZONE));
+            vel_magnitude = max(0.5, max_speed_limit * (abs_error2 / SLOW_ZONE));
           }
           double vel2 = (error2 > 0) ? vel_magnitude : -vel_magnitude;
           position_cmd2.position = NaN;
