@@ -141,17 +141,20 @@ void updateXBee() {
   // Map digit3 (0-9) to angle (-90 to +90 degrees)
   // 0 -> -90deg, 9 -> +90deg
   float angle_deg = ((float)digit3 / 9.0) * 180.0 - 90.0;
-  float pos2 = angle_deg / 360.0;  // Convert to revolutions
+  float pos2_logical = angle_deg / 360.0;  // Convert to revolutions (Relative to zero)
   
-  // Clamp to limits
-  if (pos2 < MIN_POSITION) pos2 = MIN_POSITION;
-  if (pos2 > MAX_POSITION) pos2 = MAX_POSITION;
+  // Clamp logical position to limits (-0.25 to +0.25)
+  if (pos2_logical < MIN_POSITION) pos2_logical = MIN_POSITION;
+  if (pos2_logical > MAX_POSITION) pos2_logical = MAX_POSITION;
+  
+  // Apply calibration offset
+  float pos2 = pos2_logical + MOTOR_OFFSET;
   
   Serial.print(F("[XBee] Motor 2: "));
   Serial.print(angle_deg, 1);
-  Serial.print(F(" deg = "));
+  Serial.print(F(" deg (logical) => "));
   Serial.print(pos2, 4);
-  Serial.println(F(" rev"));
+  Serial.println(F(" rev (physical)"));
   
   // Process digit4: Solenoid control
   if (digit4 == 2) {
