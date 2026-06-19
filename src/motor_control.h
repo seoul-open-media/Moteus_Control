@@ -3,6 +3,7 @@
 
 #include <ACAN2517FD.h>
 #include <Moteus.h>
+using Moteus = MoteusController<ACAN2517FD>;
 
 // External references to motor objects (defined in main.cpp)
 extern Moteus moteus1;
@@ -22,6 +23,7 @@ extern unsigned long lastXBeeCommand;  // Timestamp of last XBee command
 
 // Function declarations
 void moveToEncoderPosition(double target_ext1, double target_ext2);
+void moveToEncoderPosition(double target_ext1, double target_ext2, float max_speed_limit);
 void oscillateMotors();
 void printDiagnostics();
 void printDiagnosticsAll();

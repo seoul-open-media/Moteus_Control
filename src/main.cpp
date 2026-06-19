@@ -10,7 +10,6 @@
 #include "config.h"
 #include "motor_control.h"
 #include "display.h"
-#include "neokey.h"
 #include "xbee.h"
 #include "solenoid.h"
 
@@ -54,11 +53,11 @@ void setup() {
   // Scan I2C bus to verify display is connected
  // scanI2C();
   
-  // Initialize NeoKey on Wire (I2C bus 0)
-  initNeoKey();
-  
   // Initialize XBee on Serial4
-  initXBee();
+  // initXBee();  // [XBee DISABLED] — XBee on Serial4 commented out
+  Serial.println(F("Wired serial control active (USB Serial, 115200)"));
+  Serial.print(F("Robot ID: "));
+  Serial.println(ROBOT_ID);
   
   // Initialize electromagnets and solenoid
   initSolenoid();
@@ -129,8 +128,8 @@ void loop() {
   static unsigned long lastQueryTime = 0;
   unsigned long currentTime = millis();
   
-  // Query motors at 20Hz (every 50ms) when XBee control is NOT active
-  if (!xbeeControlActive && (currentTime - lastQueryTime >= 50)) {
+  // Query motors at 20Hz (every 50ms) — always, regardless of XBee state
+  if (currentTime - lastQueryTime >= 50) {
     Moteus::Query::Format query_fmt;
     query_fmt.mode = Moteus::kInt8;
     query_fmt.position = Moteus::kFloat;
@@ -154,14 +153,12 @@ void loop() {
   // Update OLED display with current motor status
   updateDisplay();
   
-  // Check NeoKey for button presses
-  updateNeoKey();
+  // Check wired serial for binary packets from PD (same protocol as XBee)
+  updateWiredSerial();
   
-  // Check XBee for wireless commands
-  updateXBee();
-  
-  // Update XBee continuous control
-  updateXBeeControl();
+  // [XBee DISABLED] XBee wireless communication commented out
+  // updateXBee();          // Was: XBee via Serial4
+  // updateXBeeControl();   // No-op anyway
   
   // Update electromagnet/solenoid timing
   updateSolenoid();
@@ -174,63 +171,71 @@ void loop() {
     Serial.print(F("Processing pending: "));
     Serial.println(val);
   }
-  else if (Serial.available()) {
+  else if (Serial.available() && Serial.peek() != 0xFF) {
+    // Only read text commands when incoming byte is not a binary packet header
     val = Serial.readStringUntil('\n');
     val.trim();  // Remove whitespace
   }
   
   if (val.length() > 0) {
     // Simple single-digit commands for preset positions
-    if (val == "1") {
-      Serial.println(F("Command 1: Moving Motor 2 to 0 degrees"));
+    if (val == "0") {
+      Serial.println(F("Command 0: Stop all motors"));
+      displayDebug("STOP");
+      interruptCommand = true;  // Interrupt any running movement
+      moteus1.SetStop();
+      moteus2.SetStop();
+      commandRunning = false;
+      xbeeControlActive = false;
+      Serial.println(F("Motors stopped and disengaged"));
+    }
+    
+    else if (val == "1") {
+      Serial.println(F("Command 1: Moving Motor 2 to 0 degrees [FAST]"));
       displayDebug("M2 -> 0deg");
-      // Query motors first to get current positions
       Moteus::Query::Format query_fmt;
       query_fmt.abs_position = Moteus::kFloat;
       moteus1.SetQuery(&query_fmt);
       moteus2.SetQuery(&query_fmt);
       delay(50);
       double current_ext1 = moteus1.last_result().values.abs_position;
-      moveToEncoderPosition(current_ext1, 0.0);  // 0 degrees = 0.0 rev
+      moveToEncoderPosition(current_ext1, ENCODER_CENTER + 0.0,   MAX_VELOCITY_FAST);
     }
     
     else if (val == "2") {
-      Serial.println(F("Command 2: Moving Motor 2 to -45 degrees"));
+      Serial.println(F("Command 2: Moving Motor 2 to -45 degrees [FAST]"));
       displayDebug("M2 -> -45deg");
-      // Query motors first to get current positions
       Moteus::Query::Format query_fmt;
       query_fmt.abs_position = Moteus::kFloat;
       moteus1.SetQuery(&query_fmt);
       moteus2.SetQuery(&query_fmt);
       delay(50);
       double current_ext1 = moteus1.last_result().values.abs_position;
-      moveToEncoderPosition(current_ext1, -0.125);  // -45 degrees = -0.125 rev
+      moveToEncoderPosition(current_ext1, ENCODER_CENTER - 0.125, MAX_VELOCITY_FAST);
     }
     
     else if (val == "3") {
-      Serial.println(F("Command 3: Moving Motor 2 to 45 degrees"));
+      Serial.println(F("Command 3: Moving Motor 2 to 45 degrees [FAST]"));
       displayDebug("M2 -> 45deg");
-      // Query motors first to get current positions
       Moteus::Query::Format query_fmt;
       query_fmt.abs_position = Moteus::kFloat;
       moteus1.SetQuery(&query_fmt);
       moteus2.SetQuery(&query_fmt);
       delay(50);
       double current_ext1 = moteus1.last_result().values.abs_position;
-      moveToEncoderPosition(current_ext1, 0.125);  // 45 degrees = 0.125 rev
+      moveToEncoderPosition(current_ext1, ENCODER_CENTER + 0.125, MAX_VELOCITY_FAST);
     }
     
     else if (val == "4") {
-      Serial.println(F("Command 4: Moving Motor 2 to encoder position 0.25"));
-      displayDebug("M2 -> 0.25");
-      // Query motors first to get current positions
+      Serial.println(F("Command 4: Moving Motor 2 to 90 degrees [FAST]"));
+      displayDebug("M2 -> 90deg");
       Moteus::Query::Format query_fmt;
       query_fmt.abs_position = Moteus::kFloat;
       moteus1.SetQuery(&query_fmt);
       moteus2.SetQuery(&query_fmt);
       delay(50);
       double current_ext1 = moteus1.last_result().values.abs_position;
-      moveToEncoderPosition(current_ext1, 0.25);
+      moveToEncoderPosition(current_ext1, ENCODER_CENTER + 0.25,  MAX_VELOCITY_FAST);
     }
     else if (val.indexOf("osc") != -1) {
       // Oscillate both motors
@@ -239,6 +244,18 @@ void loop() {
       oscillateMotors();
     }
     
+    else if (val == "5") {
+      Serial.println(F("Command 5: EM1+EM2+EM3 ON (50ms)"));
+      displayDebug("EM x3 ON");
+      triggerElectromagnets();
+    }
+
+    else if (val == "6") {
+      Serial.println(F("Command 6: Solenoid ON (50ms)"));
+      displayDebug("SOL ON");
+      triggerSolenoid();
+    }
+
     else if (val == "scan" || val == "i2c") {
       // Scan I2C bus for debugging
       displayDebug("Scanning I2C...");

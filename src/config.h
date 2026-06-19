@@ -21,7 +21,7 @@ static const byte MCP2517_CS  = 10;  // CS input of MCP2517
 //  Robot & Motor Configuration
 //——————————————————————————————————————————————————————————————————————————————
 // IMPORTANT: Set unique ROBOT_ID for each unit (1-100)
-static const uint8_t ROBOT_ID = 4;  // Change this for each robot!
+static const uint8_t ROBOT_ID = 6;  // Change this for each robot!
 
 // Motor Calibration Offset (Units: Revolutions)
 // Adjust this value to align the zero point (0 degree) for each robot
@@ -39,6 +39,10 @@ static const double MOTOR_OFFSET = 0.0;
 static const double MOTOR1_DIRECTION = 1.0;   // 1.0 = normal, -1.0 = reversed
 static const double MOTOR2_DIRECTION = 1.0;   // 1.0 = normal, -1.0 = reversed
 
+// External encoder center point (raw encoder value that equals 0 degrees)
+// Encoder range: 0.0 ~ 1.0,  center = 0.5,  working range = 0.25 ~ 0.75
+static const double ENCODER_CENTER = 0.5;
+
 static const int MOTOR1_ID = 1;
 static const int MOTOR2_ID = 2;
 
@@ -46,8 +50,9 @@ static const int MOTOR2_ID = 2;
 //  Control Parameters
 //——————————————————————————————————————————————————————————————————————————————
 static const double POSITION_TOLERANCE = 0.01;   // Position tolerance (3.6 degrees) - disengage when reached
-static const double MAX_VELOCITY = 5;          // Maximum velocity (rev/s)
-static const double SLOW_ZONE = 0.03;            // Start slowing down within this distance (10.8 degrees)
+static const double MAX_VELOCITY = 3.0;          // Maximum velocity (rev/s) - used by XBee
+static const double MAX_VELOCITY_FAST = 2.0;     // Fast mode velocity for serial commands (rev/s)
+static const double SLOW_ZONE = 0.06;            // Start slowing down within this distance (21.6 degrees)
 static const double BRAKE_ZONE = 0.06;           // Active braking zone (18 degrees)
 static const double OVERSHOOT_ZONE = 0.02;       // Overshoot detection zone (7.2 degrees) - stop if target crossed
 static const unsigned long LOOP_PERIOD_MS = 10;  // 100Hz control loop (10ms)

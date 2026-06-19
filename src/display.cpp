@@ -2,6 +2,7 @@
 #include "config.h"
 #include <ACAN2517FD.h>
 #include <Moteus.h>
+using Moteus = MoteusController<ACAN2517FD>;
 
 // Forward declare motor objects from main.cpp
 extern Moteus moteus1;
@@ -11,6 +12,9 @@ extern Moteus moteus2;
 extern bool xbeeControlActive;
 extern float xbeeTargetM1;
 extern float xbeeTargetM2;
+
+// Motor running state from motor_control.cpp
+extern volatile bool commandRunning;
 
 // Cached motor values (updated in updateXBeeControl)
 extern float cachedM1Pos;
@@ -110,30 +114,15 @@ void updateDisplay() {
     return;
   }
   
-  // Get motor values - use cached values when engaged, live values when disengaged
-  float m1_pos, m2_pos, m1_temp, m2_temp;
+  // Read motor 2 position and temperature directly from last result
+  const auto& motor1 = moteus1.last_result().values;
+  const auto& motor2 = moteus2.last_result().values;
+  float m2_pos  = motor2.abs_position;
+  float m1_temp = motor1.motor_temperature;
+  float m2_temp = motor2.motor_temperature;
   
-  if (xbeeControlActive) {
-    // Use cached values from updateXBeeControl (avoids NaN from immediate query read)
-    m1_pos = cachedM1Pos;
-    m2_pos = cachedM2Pos;
-    m1_temp = cachedM1Temp;
-    m2_temp = cachedM2Temp;
-  } else {
-    // Read directly when disengaged
-    const auto& motor1 = moteus1.last_result().values;
-    const auto& motor2 = moteus2.last_result().values;
-    m1_pos = motor1.abs_position;
-    m2_pos = motor2.abs_position;
-    m1_temp = motor1.motor_temperature;
-    m2_temp = motor2.motor_temperature;
-  }
-  
-  // Wrap position to -0.25 to +0.25 range and convert to degrees
-  m1_pos = fmod(m1_pos + 0.25, 0.5) - 0.25;
-  m2_pos = fmod(m2_pos + 0.25, 0.5) - 0.25;
-  float m1_deg = m1_pos * 360.0;  // Convert revolutions to degrees
-  float m2_deg = m2_pos * 360.0;
+  // Convert raw encoder (0~1, center=0.5) to degrees (-90~+90)
+  float m2_deg = (m2_pos - ENCODER_CENTER) * 360.0;
   
   // Debug: print motor values to serial
   static unsigned long lastMotorDebug = 0;
@@ -147,32 +136,40 @@ void updateDisplay() {
     lastMotorDebug = currentTime;
   }
   
-  // Header: Motor2 only (M1 disabled in workshop)
-  display.setCursor(20, 0);
+  // Header: Robot ID + Motor2
+  // Layout (128x64):
+  //  y= 0: "#4  Motor2"          (size 1, 8px)
+  //  y= 9: ───────────────────   (divider)
+  //  y=11: Pos: [big degrees]    (label y=15, number y=11, size 2, 16px → y=11..26)
+  //  y=29: Tgt: [big degrees]    (label y=33, number y=29, size 2, 16px → y=29..44)
+  //  y=49: T:XXC       ENGAGED   (size 1, 8px → no overlap)
+  display.setCursor(0, 0);
   display.setTextSize(1);
-  display.print(F("Motor2 (Workshop)"));
-  
+  display.print(F("#"));
+  display.print(ROBOT_ID);
+  display.print(F("  Motor2"));
+
   display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
-  
-  // Row 1: Position in degrees (Motor2 only, large text)
+
+  // Row 1: Current position (size-2 number, size-1 label)
   display.setCursor(0, 15);
   display.setTextSize(1);
   display.print(F("Pos:"));
-  display.setCursor(30, 12);
+  display.setCursor(30, 11);
   display.setTextSize(2);
-  display.print(F("     "));  // Clear
-  display.setCursor(30, 12);
   display.print((int)m2_deg);
   display.setTextSize(1);
   display.print(F("deg"));
-  
-  // Row 2: Target in degrees (Motor2 only)
+
+  // Row 2: Target position (size-2 number, size-1 label)
   display.setCursor(0, 33);
   display.setTextSize(1);
-  display.print(F("Targ:"));
+  display.print(F("Tgt:"));
+  display.setCursor(30, 29);
+  display.setTextSize(2);
   if (xbeeControlActive) {
-    float targ2_deg = xbeeTargetM2 * 360.0;
-    
+    float targ2_deg = (xbeeTargetM2 - ENCODER_CENTER) * 360.0;
+
     // Debug print targets
     static unsigned long lastTargDebug = 0;
     if (currentTime - lastTargDebug > 2000) {
@@ -183,39 +180,30 @@ void updateDisplay() {
       Serial.println(F("deg)"));
       lastTargDebug = currentTime;
     }
-    
-    display.setCursor(30, 30);
-    display.setTextSize(2);
-    display.print(F("     "));  // Clear
-    display.setCursor(30, 30);
+
     display.print((int)targ2_deg);
     display.setTextSize(1);
     display.print(F("deg"));
   } else {
-    display.setCursor(35, 30);
-    display.setTextSize(2);
     display.print(F(" --"));
   }
-  
-  // Row 3: Temperature (Motor2 only)
-  display.setCursor(0, 50);
+
+  // Row 3: Temperature (left) + Status (right) — different x, no overlap
   display.setTextSize(1);
-  display.print(F("Temp: "));
-  display.print(m2_temp, 0);
+  display.setCursor(0, 49);
+  display.print(F("T:"));
+  display.print((int)m2_temp);
   display.print(F("C"));
-  
-  // Status line at bottom
-  display.setCursor(0, 50);
-  if (xbeeControlActive) {
+
+  display.setCursor(68, 49);
+  if (m1_temp > 50.0 || m2_temp > 50.0) {
+    display.print(F("  WARM!"));
+  } else if (commandRunning) {
+    display.print(F("MOVING "));
+  } else if (xbeeControlActive) {
     display.print(F("ENGAGED"));
   } else {
-    display.print(F("DISENGAGED"));
-  }
-  
-  // Temperature warning
-  if (m1_temp > 50.0 || m2_temp > 50.0) {
-    display.setCursor(80, 50);
-    display.print(F("WARM"));
+    display.print(F("DISENGD"));
   }
   
   // Critical temperature warning with inverted display

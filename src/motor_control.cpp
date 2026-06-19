@@ -1,8 +1,8 @@
 #include "motor_control.h"
 #include "config.h"
 #include "display.h"
-// REMOVED: #include "neokey.h"
 #include "solenoid.h"
+using Moteus = MoteusController<ACAN2517FD>;
 
 // Global flag to interrupt current motor command
 volatile bool interruptCommand = false;
@@ -226,7 +226,6 @@ void oscillateMotors() {
   Serial.println(F("Using continuous sine wave velocity"));
   
   while (true) {
-    // REMOVED: NeoKey check (NeoKey hardware removed)
     unsigned long current_time = millis();
     
     // Check for interrupt command from serial input
@@ -244,8 +243,7 @@ void oscillateMotors() {
       interruptCommand = false;
       moteus1.SetStop();
       moteus2.SetStop();
-      
-      // REMOVED: NeoKey LED reset
+
       return;
     }
     
@@ -289,6 +287,11 @@ void oscillateMotors() {
     
     delay(10);  // 100Hz control loop
   }
+}
+
+// 2-argument wrapper (uses default MAX_VELOCITY)
+void moveToEncoderPosition(double target_ext1, double target_ext2) {
+  moveToEncoderPosition(target_ext1, target_ext2, MAX_VELOCITY);
 }
 
 void moveToEncoderPosition(double target_ext1, double target_ext2, float max_speed_limit) {
@@ -388,7 +391,8 @@ void moveToEncoderPosition(double target_ext1, double target_ext2, float max_spe
     // Update solenoid state (turn off if duration exprired)
     updateSolenoid();
     
-    // REMOVED: NeoKey check (NeoKey hardware removed)
+    // Update display during motor movement
+    updateDisplay();
     
     // Check for interrupt command from serial input
     if (Serial.available()) {
@@ -405,8 +409,7 @@ void moveToEncoderPosition(double target_ext1, double target_ext2, float max_spe
       interruptCommand = false;
       moteus1.SetStop();
       moteus2.SetStop();
-      
-      // REMOVED: NeoKey LED reset
+
       return;
     }
     
@@ -491,21 +494,12 @@ void moveToEncoderPosition(double target_ext1, double target_ext2, float max_spe
             moteus2.SetStop();
             commandRunning = false;
             interruptCommand = false;
-            
-            // REMOVED: NeoKey LED reset
+
             return;
           }
         }
         
         double error1 = target_ext1 - current_ext1;
-        
-        // Handle wrap-around
-        if (error1 > 0.5) {
-          error1 = error1 - 1.0;
-        } else if (error1 < -0.5) {
-          error1 = error1 + 1.0;
-        }
-        
         double abs_error1 = abs(error1);
         
         // Check for overshoot: only when close to target and error sign changes
@@ -516,7 +510,6 @@ void moveToEncoderPosition(double target_ext1, double target_ext2, float max_spe
               motor1_done = true;
               motor1_brake_applied = true;
               moteus1.SetStop();
-              triggerMotorBrake();
               Serial.println(F("[MotorControl] Motor 1 OVERSHOOT DETECTED - STOPPED"));
               break;
             }
@@ -530,16 +523,13 @@ void moveToEncoderPosition(double target_ext1, double target_ext2, float max_spe
           if (motor1_stop_count > 2 && !motor1_brake_applied) {  // 3 stable cycles (30ms) to confirm arrival
             motor1_done = true;
             motor1_brake_applied = true;  // Set flag to prevent re-triggering
-            // Disengage motor
             moteus1.SetStop();
-            // Apply electromagnetic brake for 100ms to prevent bounce
-            triggerMotorBrake();
-            Serial.println(F("[MotorControl] Motor 1 STOPPED + BRAKE ENGAGED"));
+            Serial.println(F("[MotorControl] Motor 1 STOPPED"));
             // Exit immediately - don't send any more commands after SetStop
             break;
           }
           // Slow final approach
-          double vel1 = (error1 > 0) ? 0.2 : -0.2;  // 0.2 rev/s constant
+          double vel1 = (error1 > 0) ? 0.05 : -0.05;  // 0.05 rev/s constant
           position_cmd1.position = NaN;
           position_cmd1.velocity = vel1 * MOTOR1_DIRECTION;
           position_cmd1.maximum_torque = 3.0;
@@ -551,7 +541,7 @@ void moveToEncoderPosition(double target_ext1, double target_ext2, float max_spe
           if (abs_error1 > SLOW_ZONE) {
             vel_magnitude = max_speed_limit;
           } else {
-            vel_magnitude = max(0.5, max_speed_limit * (abs_error1 / SLOW_ZONE));
+            vel_magnitude = max(0.05, max_speed_limit * (abs_error1 / SLOW_ZONE));
           }
           double vel1 = (error1 > 0) ? vel_magnitude : -vel_magnitude;
           position_cmd1.position = NaN;
@@ -618,21 +608,12 @@ void moveToEncoderPosition(double target_ext1, double target_ext2, float max_spe
             moteus2.SetStop();
             commandRunning = false;
             interruptCommand = false;
-            
-            // REMOVED: NeoKey LED reset
+
             return;
           }
         }
         
         double error2 = target_ext2 - current_ext2;
-        
-        // Handle wrap-around
-        if (error2 > 0.5) {
-          error2 = error2 - 1.0;
-        } else if (error2 < -0.5) {
-          error2 = error2 + 1.0;
-        }
-        
         double abs_error2 = abs(error2);
         
         // Check for overshoot: only when close to target and error sign changes
@@ -643,7 +624,6 @@ void moveToEncoderPosition(double target_ext1, double target_ext2, float max_spe
               motor2_done = true;
               motor2_brake_applied = true;
               moteus2.SetStop();
-              triggerMotorBrake();
               Serial.println(F("[MotorControl] Motor 2 OVERSHOOT DETECTED - STOPPED"));
               break;
             }
@@ -657,16 +637,13 @@ void moveToEncoderPosition(double target_ext1, double target_ext2, float max_spe
           if (motor2_stop_count > 2 && !motor2_brake_applied) {  // 3 stable cycles (30ms) to confirm arrival
             motor2_done = true;
             motor2_brake_applied = true;  // Set flag to prevent re-triggering
-            // Disengage motor
             moteus2.SetStop();
-            // Apply electromagnetic brake for 100ms to prevent bounce
-            triggerMotorBrake();
-            Serial.println(F("[MotorControl] Motor 2 STOPPED + BRAKE ENGAGED"));
+            Serial.println(F("[MotorControl] Motor 2 STOPPED"));
             // Exit immediately - don't send any more commands after SetStop
             break;
           }
           // Slow final approach
-          double vel2 = (error2 > 0) ? 0.2 : -0.2;  // 0.2 rev/s constant
+          double vel2 = (error2 > 0) ? 0.05 : -0.05;  // 0.05 rev/s constant
           position_cmd2.position = NaN;
           position_cmd2.velocity = vel2 * MOTOR2_DIRECTION;
           position_cmd2.maximum_torque = 3.0;
@@ -678,7 +655,7 @@ void moveToEncoderPosition(double target_ext1, double target_ext2, float max_spe
           if (abs_error2 > SLOW_ZONE) {
             vel_magnitude = max_speed_limit;
           } else {
-            vel_magnitude = max(0.5, max_speed_limit * (abs_error2 / SLOW_ZONE));
+            vel_magnitude = max(0.05, max_speed_limit * (abs_error2 / SLOW_ZONE));
           }
           double vel2 = (error2 > 0) ? vel_magnitude : -vel_magnitude;
           position_cmd2.position = NaN;
@@ -700,46 +677,27 @@ void moveToEncoderPosition(double target_ext1, double target_ext2, float max_spe
       
       loop_count++;
       
-      // Print status every 20 loops
-      if (loop_count % 20 == 0) {
-        double display_error1 = target_ext1 - moteus1.last_result().values.abs_position;
-        if (display_error1 > 0.5) display_error1 -= 1.0;
-        else if (display_error1 < -0.5) display_error1 += 1.0;
+      // Print status every 5 loops (50ms)
+      if (loop_count % 5 == 0) {
+        double cur2 = moteus2.last_result().values.abs_position;
+        double display_error2 = target_ext2 - cur2;
         
-        double display_error2 = target_ext2 - moteus2.last_result().values.abs_position;
-        if (display_error2 > 0.5) display_error2 -= 1.0;
-        else if (display_error2 < -0.5) display_error2 += 1.0;
-        
-        Serial.print(F("M1: ext="));
-        Serial.print(moteus1.last_result().values.abs_position, 4);
-        Serial.print(F(" err="));
-        Serial.print(display_error1, 4);
-        Serial.print(F(" vel="));
-        Serial.print(position_cmd1.velocity, 2);
-        Serial.print(F(" done="));
-        Serial.print(motor1_done);
-        
-        Serial.print(F(" | M2: ext="));
-        Serial.print(moteus2.last_result().values.abs_position, 4);
+        Serial.print(F("M2: pos="));
+        Serial.print(cur2, 4);
+        Serial.print(F(" tgt="));
+        Serial.print(target_ext2, 4);
         Serial.print(F(" err="));
         Serial.print(display_error2, 4);
         Serial.print(F(" vel="));
-        Serial.print(position_cmd2.velocity, 2);
-        Serial.print(F(" done="));
-        Serial.println(motor2_done);
+        Serial.println(position_cmd2.velocity, 3);
       }
       
       // Exit when both motors done
       if (motor1_done && motor2_done) {
         Serial.println(F("Both motors reached target!"));
-        displayDebug("Target reached!");
-        
-        // Set velocity to 0 to hold position instead of stopping
-        position_cmd1.velocity = 0;
-        position_cmd2.velocity = 0;
-        moteus1.SetPosition(position_cmd1, &position_fmt);
-        moteus2.SetPosition(position_cmd2, &position_fmt);
-        
+        displayDebug("Done!");
+        moteus1.SetStop();
+        moteus2.SetStop();
         commandRunning = false;
         break;
       }
@@ -749,13 +707,9 @@ void moveToEncoderPosition(double target_ext1, double target_ext2, float max_spe
     if (current_time - start_time > TIMEOUT_MS) {
       Serial.println(F("Timeout!"));
       displayDebug("Timeout!");
+      moteus1.SetStop();
+      moteus2.SetStop();
       commandRunning = false;
-      
-      // Set velocity to 0 to hold current position
-      position_cmd1.velocity = 0;
-      position_cmd2.velocity = 0;
-      moteus1.SetPosition(position_cmd1, &position_fmt);
-      moteus2.SetPosition(position_cmd2, &position_fmt);
       break;
     }
   }
