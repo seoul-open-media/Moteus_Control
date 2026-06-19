@@ -42,6 +42,7 @@ void setup() {
 
   // Let the world know we have begun!
   Serial.begin(115200);
+  Serial.setTimeout(20);  // Prevent 1s blocking in readStringUntil() during PD operation
  // while (!Serial) {}
  delay(1000);
   Serial.println(F("started"));
