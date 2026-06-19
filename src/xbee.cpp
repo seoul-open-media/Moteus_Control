@@ -58,18 +58,38 @@ void initXBee() {
 // Source: Pure Data (PD) over USB Serial at 115200 baud
 // ——————————————————————————————————————————————————————————————————————————————
 void updateWiredSerial() {
-  // Only process binary packets — peek to avoid consuming text commands
-  if (Serial.available() < 28 || Serial.peek() != 0xFF) {
-    return;  // Not enough data or not a binary packet header
+  if (Serial.available() == 0) return;
+
+  // If the front byte is NOT 0xFF, it's a text command — let the text handler deal with it
+  if (Serial.peek() != 0xFF) return;
+
+  // Front byte IS 0xFF (binary packet header candidate)
+  // Use a timeout: if a full 28-byte packet doesn't arrive within 100ms, flush and unblock text commands
+  static unsigned long packetStartTime = 0;
+  if (packetStartTime == 0) packetStartTime = millis();
+
+  if (Serial.available() < 28) {
+    if (millis() - packetStartTime > 100) {
+      // Stale / incomplete packet — flush buffer so text commands can work again
+      while (Serial.available()) Serial.read();
+      packetStartTime = 0;
+      Serial.println(F("[SER] Stale packet flushed — buffer cleared"));
+    }
+    return;  // Wait for full packet
   }
+
+  packetStartTime = 0;  // Full packet arrived — reset timer
 
   // Consume first header byte (0xFF already confirmed by peek)
   Serial.read();  // discard 0xFF byte1
 
-  // Check second header byte (0xFF)
+  // Check second header byte (must also be 0xFF)
   uint8_t byte2 = Serial.read();
   if (byte2 != 0xFF) {
-    return;  // Not a valid header
+    // Malformed header — flush remaining bytes and unblock
+    while (Serial.available()) Serial.read();
+    Serial.println(F("[SER] Bad header — buffer flushed"));
+    return;
   }
 
   Serial.println(F("[SER] Header 0xFF 0xFF found!"));
